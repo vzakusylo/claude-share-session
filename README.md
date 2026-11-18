@@ -7,7 +7,9 @@ and the sidebar is empty: "different projects". This tool makes every account se
 the same scheduled tasks and a short briefing of what the other account just did, so you can pick up
 exactly where you left off.
 
-> Windows 11 · Claude desktop app (Code tab) and Claude Code CLI · PowerShell 7 · no services, no cloud, no network.
+![How claude-share-session works](docs/infographic.png)
+
+> Windows 11 · macOS (beta) · Claude desktop app (Code tab) and Claude Code CLI · PowerShell 7 · no services, no cloud, no network.
 
 ---
 
@@ -144,6 +146,41 @@ Git, Node.js (only for the optional fidelity test).
 
 Uninstall: `install.ps1 -Uninstall` (removes hooks and skills; mirrored sessions and the data folder stay).
 
+## macOS
+
+The same code runs on macOS with PowerShell 7 — there is no separate implementation.
+
+```sh
+brew install powershell git
+git clone https://github.com/vzakusylo/claude-share-session.git ~/tools/claude-share-session
+cd ~/tools/claude-share-session
+chmod +x install.sh share-work.sh
+./install.sh
+./share-work.sh status
+./share-work.sh sync -DryRun
+./share-work.sh sync
+```
+
+What differs on macOS:
+
+| | Windows | macOS |
+|---|---|---|
+| Shared Claude Code folder | `%USERPROFILE%\.claude` | `~/.claude` |
+| Desktop session index (auto-detected) | `%LOCALAPPDATA%\Claude-Data\claude_*\claude-code-sessions` | `~/Library/Application Support/Claude*/claude-code-sessions` |
+| Hook launcher | `pwsh.exe` | `pwsh` (Homebrew), background step detached with `nohup` |
+| Lock | named mutex | named mutex (.NET on Unix) |
+
+If `status` says the `claude-code-sessions` folder was not found, find it once and point the tool at it:
+
+```sh
+find ~/Library/Application\ Support -maxdepth 3 -type d -name claude-code-sessions
+export SHAREWORK_SESSIONS_ROOT="<that folder>"   # add to ~/.zshrc
+```
+
+> The macOS desktop folder layout is inferred from the Windows build (same Electron app); it was **not
+> verified on a Mac yet**. The Claude Code part (`~/.claude/projects`, hooks, skills) is the same on both.
+> Please open an issue with the output of `./share-work.sh status` if something differs.
+
 ## Commands
 
 ```
@@ -237,7 +274,7 @@ node tests\compare-mirror.js "$env:LOCALAPPDATA\Claude-Data\<claude_folder>\clau
 * `local_*.json` and `scheduled-tasks.json` are **internal formats** of the desktop app and may change in a
   new version. Tested with Claude desktop 4.23118 and Claude Code 2.1.317. That is why there are backups and
   `-DryRun`.
-* Windows only (paths, PowerShell). On macOS/Linux the same idea applies but the paths differ.
+* Windows is tested; macOS support uses the same code and is not yet verified on a real Mac (see [macOS](#macos)).
 * Not affiliated with Anthropic. Use at your own risk.
 
 ## License

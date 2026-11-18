@@ -3,14 +3,16 @@
 # usage: pwsh -NoProfile -File tests\test-scheduled.ps1 -Work <empty temp dir>
 param([Parameter(Mandatory)] [string] $Work)
 $ErrorActionPreference = 'Stop'
-$real = Join-Path (Get-ChildItem "$env:LOCALAPPDATA\Claude-Data" -Directory -Filter 'claude_*' | Select-Object -First 1).FullName 'claude-code-sessions'
+Remove-Item env:SHAREWORK_SESSIONS_ROOT -ErrorAction SilentlyContinue
+Import-Module (Join-Path $PSScriptRoot '../src/ShareWork.psm1') -Force
+$real = Get-SwSessionsRoot
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $Work | Out-Null
 Copy-Item $real (Join-Path $Work 'sessions') -Recurse
 $env:SHAREWORK_SESSIONS_ROOT = Join-Path $Work 'sessions'
 $env:SHAREWORK_HOME = Join-Path $Work 'home'
 Remove-Item env:CLAUDE_CODE_ACCOUNT_UUID -ErrorAction SilentlyContinue
-Import-Module (Join-Path $PSScriptRoot '..\src\ShareWork.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../src/ShareWork.psm1') -Force
 
 # the two accounts with the most sessions play "alice" (A) and "bob" (B) in this sandbox
 $two = @(Get-SwAccounts | Where-Object PrimaryDir | Sort-Object Sessions -Descending | Select-Object -First 2)
@@ -39,7 +41,7 @@ Edit-Reg $alice { param($x) $x['scheduledTasks'] = @($x['scheduledTasks'] | Wher
 # 1. alice active: push creates alice's task in bob
 $r = TaskRows (Sync-SwAll -From $alice -To @($bob) -Policy (Pol $alice))
 Check '1 create alice task in bob' (($r | Where-Object Action -eq 'task-create').Count -ge 1 -and (Task $bob 'seed-task'))
-Check '1 copied task keeps prompt path + notify session' ((Task $bob 'seed-task')['filePath'] -like '*\.claude\scheduled-tasks\seed-task\SKILL.md' -and (Task $bob 'seed-task')['notifySessionId'])
+Check '1 copied task keeps prompt path + notify session' ((Task $bob 'seed-task')['filePath'] -like '*scheduled-tasks*seed-task*SKILL.md' -and (Task $bob 'seed-task')['notifySessionId'])
 
 # 2. idempotent
 $r = TaskRows (Sync-SwAll -From $alice -To @($bob) -Policy (Pol $alice))

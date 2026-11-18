@@ -34,7 +34,7 @@ $script:TaskRunStateKeys = @('lastRunAt', 'lastScheduledFor')
 #region paths & config -------------------------------------------------------------------------
 
 function Get-SwHome {
-    if ($env:SHAREWORK_HOME) { $h = $env:SHAREWORK_HOME } else { $h = Join-Path $HOME '.claude\shared-work' }
+    if ($env:SHAREWORK_HOME) { $h = $env:SHAREWORK_HOME } else { $h = Join-Path $HOME '.claude/shared-work' }
     foreach ($d in $h, (Join-Path $h 'status'), (Join-Path $h 'handoffs'), (Join-Path $h 'backups')) {
         if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
     }
@@ -43,12 +43,22 @@ function Get-SwHome {
 
 function Get-SwSessionsRoot {
     if ($env:SHAREWORK_SESSIONS_ROOT) { return $env:SHAREWORK_SESSIONS_ROOT }
-    $base = Join-Path $env:LOCALAPPDATA 'Claude-Data'
-    $data = Get-ChildItem $base -Directory -Filter 'claude_*' -ErrorAction SilentlyContinue |
-        Where-Object { Test-Path (Join-Path $_.FullName 'claude-code-sessions') } |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $data) { throw "Claude desktop data folder not found under $base" }
-    Join-Path $data.FullName 'claude-code-sessions'
+    # Windows (MSIX): %LOCALAPPDATA%\Claude-Data\claude_<pkg>\claude-code-sessions
+    # macOS:          ~/Library/Application Support/Claude*/claude-code-sessions
+    # Linux:          ~/.config/Claude*/claude-code-sessions
+    $bases = if ($IsWindows) { @((Join-Path $env:LOCALAPPDATA 'Claude-Data'), $env:LOCALAPPDATA, $env:APPDATA) }
+             elseif ($IsMacOS) { @((Join-Path $HOME 'Library/Application Support')) }
+             else { @((Join-Path $HOME '.config')) }
+    $cands = foreach ($b in $bases | Where-Object { $_ -and (Test-Path $_) }) {
+        foreach ($d in @(Get-Item $b) + @(Get-ChildItem $b -Directory -Filter 'Claude*' -ErrorAction SilentlyContinue) +
+                       @(Get-ChildItem $b -Directory -Filter 'claude_*' -ErrorAction SilentlyContinue)) {
+            $s = Join-Path $d.FullName 'claude-code-sessions'
+            if (Test-Path $s) { Get-Item $s }
+        }
+    }
+    $hit = $cands | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $hit) { throw "Claude desktop 'claude-code-sessions' folder not found (looked in: $($bases -join '; ')). Set SHAREWORK_SESSIONS_ROOT." }
+    $hit.FullName
 }
 
 function Get-SwConfig {
@@ -158,6 +168,10 @@ function Get-SwCurrentAccount {
 
 #region project identity -----------------------------------------------------------------------
 
+function ConvertTo-SwNativePath([string]$P) {
+    if ($IsWindows) { $P -replace '/', '\' } else { $P }
+}
+
 function Get-SwProjectKey([string]$Cwd) {
     <# Main repository root for a cwd (worktrees map to their main repo). Lower-case full path. #>
     if (-not $Cwd) { return '' }
@@ -165,14 +179,14 @@ function Get-SwProjectKey([string]$Cwd) {
     try {
         $common = & git -C $Cwd rev-parse --path-format=absolute --git-common-dir 2>$null
         if ($LASTEXITCODE -eq 0 -and $common) {
-            $common = ($common | Select-Object -First 1).Trim() -replace '/', '\'
+            $common = ConvertTo-SwNativePath (($common | Select-Object -First 1).Trim())
             $root = if ((Split-Path $common -Leaf) -eq '.git') { Split-Path $common -Parent } else { $common }
         }
     } catch { }
     if (-not $root) {
-        $root = ($Cwd -replace '/', '\') -replace '\\\.claude\\worktrees\\[^\\]+.*$', ''
+        $root = (ConvertTo-SwNativePath $Cwd) -replace '[\\/]\.claude[\\/]worktrees[\\/][^\\/]+.*$', ''
     }
-    $root.TrimEnd('\').ToLowerInvariant()
+    $root.TrimEnd('\', '/').ToLowerInvariant()
 }
 
 function Get-SwProjectSlug([string]$ProjectKey) { ($ProjectKey -replace '[^A-Za-z0-9]+', '-').Trim('-') }
@@ -256,7 +270,7 @@ function Sync-SwSessions {
             if ($DryRun) { continue }
             try {
                 if ($action -eq 'update') {
-                    $bdir = Join-Path $home_ ("backups\{0}\{1:yyyyMMdd}" -f $dst.Name, (Get-Date))
+                    $bdir = Join-Path $home_ ("backups/{0}/{1:yyyyMMdd}" -f $dst.Name, (Get-Date))
                     if (-not (Test-Path $bdir)) { New-Item -ItemType Directory $bdir -Force | Out-Null }
                     Copy-Item -LiteralPath $targetPath -Destination (Join-Path $bdir ('{0:HHmmss}-{1}' -f (Get-Date), $sf.Name)) -Force
                 }
@@ -340,13 +354,13 @@ function Merge-SwTask($Src, $Dst, [bool]$SrcNewer) {
 }
 
 function Get-SwTaskSnapshot([string]$AccountName) {
-    $p = Join-Path (Get-SwHome) "sched\$AccountName.json"
+    $p = Join-Path (Get-SwHome) "sched/$AccountName.json"
     $j = Read-SwJsonFile $p
     if ($j -and $j['ids']) { @($j['ids']) } elseif ($j) { @() } else { $null }
 }
 
 function Save-SwTaskSnapshot([string]$AccountName, [string[]]$Ids) {
-    $p = Join-Path (Get-SwHome) "sched\$AccountName.json"
+    $p = Join-Path (Get-SwHome) "sched/$AccountName.json"
     Write-SwFileAtomic $p (@{ ids = @($Ids | Sort-Object -Unique); at = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json)
 }
 
@@ -434,7 +448,7 @@ function Sync-SwScheduledTasks {
         }
         try {
             if ($dstExists) {
-                $bdir = Join-Path $home_ ("backups\{0}\{1:yyyyMMdd}" -f $dstAcct.Name, (Get-Date))
+                $bdir = Join-Path $home_ ("backups/{0}/{1:yyyyMMdd}" -f $dstAcct.Name, (Get-Date))
                 if (-not (Test-Path $bdir)) { New-Item -ItemType Directory $bdir -Force | Out-Null }
                 Copy-Item -LiteralPath $dstPath -Destination (Join-Path $bdir ('{0:HHmmss}-scheduled-tasks.json' -f (Get-Date))) -Force
             }
@@ -453,7 +467,7 @@ function Sync-SwScheduledTasks {
 }
 
 function Test-SwDesktopRunning {
-    [bool](Get-Process -Name 'claude' -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*\WindowsApps\Claude_*' -or $_.Path -like '*AnthropicClaude*' })
+    [bool](Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^claude$' -and $_.Path -and ($_.Path -like '*\WindowsApps\Claude_*' -or $_.Path -like '*AnthropicClaude*' -or $_.Path -like '*/Claude.app/Contents/MacOS/*') })
 }
 
 function Get-SwTaskWritePolicy {
@@ -485,7 +499,7 @@ function Sync-SwAll {
 }
 
 function Invoke-SwWithLock([scriptblock]$Body, [int]$TimeoutMs = 20000) {
-    $m = [System.Threading.Mutex]::new($false, 'Local\ClaudeShareWorkSync')
+    $m = [System.Threading.Mutex]::new($false, $(if ($IsWindows) { 'Local\ClaudeShareWorkSync' } else { 'ClaudeShareWorkSync' }))
     $got = $false
     try {
         try { $got = $m.WaitOne($TimeoutMs) } catch [System.Threading.AbandonedMutexException] { $got = $true }
@@ -507,7 +521,7 @@ function Get-SwIndexByCliSession($Account, [string]$CliSessionId) {
 
 function Update-SwStatus {
     param([Parameter(Mandatory)] $Me, [Parameter(Mandatory)] [string] $CliSessionId, [string] $Cwd)
-    $p = Join-Path (Get-SwHome) ("status\{0}.json" -f $Me.Name)
+    $p = Join-Path (Get-SwHome) ("status/{0}.json" -f $Me.Name)
     $st = if (Test-Path $p) { Get-Content $p -Raw | ConvertFrom-Json -AsHashtable } else { $null }
     if (-not $st) { $st = @{ account = $Me.Name; accountUuid = $Me.Uuid; sessions = @() } }
     $idx = Get-SwIndexByCliSession $Me $CliSessionId
@@ -549,7 +563,7 @@ function New-SwHandoff {
     param([Parameter(Mandatory)] $Me, [Parameter(Mandatory)] [string] $Cwd, [Parameter(Mandatory)] [string] $Body,
         [string] $Title = 'handoff', [string] $CliSessionId, [string] $To = 'any')
     $proj = Get-SwProjectKey $Cwd
-    $dir = Join-Path (Get-SwHome) ("handoffs\" + (Get-SwProjectSlug $proj))
+    $dir = Join-Path (Get-SwHome) ("handoffs/" + (Get-SwProjectSlug $proj))
     $ts = Get-Date
     $file = Join-Path $dir ('{0:yyyyMMdd-HHmmss}-{1}.md' -f $ts, $Me.Name)
     $fm = @(
@@ -570,7 +584,7 @@ function New-SwHandoff {
 }
 
 function Get-SwHandoffs([string]$ProjectKey, [int]$Days = 14) {
-    $dir = Join-Path (Get-SwHome) ("handoffs\" + (Get-SwProjectSlug $ProjectKey))
+    $dir = Join-Path (Get-SwHome) ("handoffs/" + (Get-SwProjectSlug $ProjectKey))
     Get-ChildItem $dir -Filter '*.md' -File -ErrorAction SilentlyContinue |
         Where-Object LastWriteTime -gt (Get-Date).AddDays(-$Days) | Sort-Object Name -Descending | ForEach-Object {
             $from = if ($_.BaseName -match '-([^-]+)$') { $Matches[1] } else { '?' }
@@ -597,7 +611,7 @@ function Get-SwBriefing {
         $lines.Add("Account '$($st['account'])' worked in this project recently:")
         foreach ($s in $rel) {
             $when = ([datetime]$s['at']).ToLocalTime().ToString('yyyy-MM-dd HH:mm')
-            $where = if ($s['cwd'] -and $s['cwd'].ToLowerInvariant().TrimEnd('\') -ne $proj) { " in $($s['cwd'])" } else { '' }
+            $where = if ($s['cwd'] -and $s['cwd'].ToLowerInvariant().TrimEnd('\', '/') -ne $proj) { " in $($s['cwd'])" } else { '' }
             $br = if ($s['branch']) { " [branch $($s['branch'])]" } else { '' }
             $lines.Add("- $when  `"$($s['title'])`"$where$br  (claude --resume $($s['cliSessionId']))")
             $what = @($s['wrapUp'], $s['summary']) | Where-Object { $_ } | Select-Object -First 1

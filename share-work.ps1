@@ -27,7 +27,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'src\ShareWork.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'src/ShareWork.psm1') -Force
 
 if ($DelaySeconds -gt 0) { Start-Sleep -Seconds $DelaySeconds }
 try { Register-SwCurrentAccount } catch { }

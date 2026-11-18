@@ -1,7 +1,7 @@
 #requires -Version 7.2
 <#
 .SYNOPSIS
-  Installs shared-work hooks and skills into %USERPROFILE%\.claude (shared by every Claude account of this Windows user).
+  Installs shared-work hooks and skills into ~/.claude (Windows: %USERPROFILE%\.claude) (shared by every Claude account of this Windows user).
 .PARAMETER Names
   Account names as "uuidPrefix=name,uuidPrefix=name", e.g. "1a2b3c4d=alice,5e6f7a8b=bob".
 .PARAMETER Uninstall
@@ -10,11 +10,11 @@
 param([string] $Names = '', [switch] $Uninstall, [string] $ClaudeDir = (Join-Path $HOME '.claude'))
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'src\ShareWork.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'src/ShareWork.psm1') -Force
 
 $claudeDir = $ClaudeDir
 $settingsPath = Join-Path $claudeDir 'settings.json'
-$marker = 'claude-share-session\hooks'
+$marker = ((Join-Path $PSScriptRoot 'hooks') | ConvertTo-Json -Compress).Trim('"')   # JSON-escaped hooks folder path
 $pwsh = (Get-Command pwsh).Source
 
 # --- settings.json hooks (backup first) --------------------------------------------------------
@@ -24,7 +24,7 @@ if (-not $settings.ContainsKey('hooks')) { $settings['hooks'] = @{} }
 
 function Remove-OurHooks([hashtable]$hooks) {
     foreach ($ev in @($hooks.Keys)) {
-        $kept = @($hooks[$ev] | Where-Object { -not (($_ | ConvertTo-Json -Depth 10 -Compress).Contains($marker.Replace('\', '\\'))) })
+        $kept = @($hooks[$ev] | Where-Object { -not (($_ | ConvertTo-Json -Depth 10 -Compress).Contains($marker)) })
         if ($kept.Count) { $hooks[$ev] = $kept } else { $hooks.Remove($ev) }
     }
 }
@@ -35,7 +35,7 @@ if (-not $Uninstall) {
         @{ hooks = @(@{
                     type    = 'command'
                     command = $pwsh
-                    args    = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot "hooks\$script")) + $extra
+                    args    = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'hooks' $script)) + $extra
                     timeout = $timeout
                 }) }
     }
@@ -55,16 +55,16 @@ Write-SwFileAtomic $settingsPath ($settings | ConvertTo-Json -Depth 20)
 
 # --- skills --------------------------------------------------------------------------------
 foreach ($s in 'handoff', 'shared-work') {
-    $dst = Join-Path $claudeDir "skills\$s"
+    $dst = Join-Path $claudeDir 'skills' $s
     if ($Uninstall) {
         if (Test-Path (Join-Path $dst '.sharework')) { Remove-Item $dst -Recurse -Force; "skill /$s removed" }
         continue
     }
     if ((Test-Path $dst) -and -not (Test-Path (Join-Path $dst '.sharework'))) { Write-Warning "skill folder $dst exists and is not ours — skipped"; continue }
     New-Item -ItemType Directory $dst -Force | Out-Null
-    $skill = (Get-Content (Join-Path $PSScriptRoot "skills\$s\SKILL.md") -Raw).Replace('{{SHAREWORK_DIR}}', $PSScriptRoot)
+    $skill = (Get-Content (Join-Path $PSScriptRoot 'skills' $s 'SKILL.md') -Raw).Replace('{{SHAREWORK_DIR}}\share-work.ps1', (Join-Path $PSScriptRoot 'share-work.ps1'))
     [IO.File]::WriteAllText((Join-Path $dst 'SKILL.md'), $skill, [Text.UTF8Encoding]::new($false))
-    Set-Content (Join-Path $dst '.sharework') "installed by $PSScriptRoot\install.ps1"
+    Set-Content (Join-Path $dst '.sharework') "installed by $(Join-Path $PSScriptRoot 'install.ps1')"
     "skill /$s installed"
 }
 if ($Uninstall) { return }

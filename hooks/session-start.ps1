@@ -2,7 +2,7 @@
 # SessionStart hook: inject a briefing about other accounts' work in this project.
 # Fails open: any error -> no output, exit 0 (coordination must never block a session).
 try {
-    Import-Module (Join-Path $PSScriptRoot '..\src\ShareWork.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../src/ShareWork.psm1') -Force
     $raw = [Console]::In.ReadToEnd()
     $in = if ($raw) { $raw | ConvertFrom-Json -AsHashtable } else { @{} }
     $cwd = if ($in['cwd']) { $in['cwd'] } else { (Get-Location).Path }
@@ -15,6 +15,6 @@ try {
             ConvertTo-Json -Depth 4 -Compress
     }
 } catch {
-    try { Import-Module (Join-Path $PSScriptRoot '..\src\ShareWork.psm1'); Write-SwLog "session-start hook error: $($_.Exception.Message)" } catch { }
+    try { Import-Module (Join-Path $PSScriptRoot '../src/ShareWork.psm1'); Write-SwLog "session-start hook error: $($_.Exception.Message)" } catch { }
 }
 exit 0
