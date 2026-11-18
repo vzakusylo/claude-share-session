@@ -45,8 +45,9 @@ if (-not $Uninstall) {
         SessionEnd   = New-HookEntry 'turn-end.ps1' @('-Event', 'SessionEnd')
     }
     foreach ($ev in $add.Keys) {
-        $cur = if ($settings['hooks'].ContainsKey($ev)) { @($settings['hooks'][$ev]) } else { @() }
-        $settings['hooks'][$ev] = @($cur + $add[$ev])
+        # @(...) around the whole if: an `if` expression unrolls a one-item array into the bare item
+        $cur = @(if ($settings['hooks'].ContainsKey($ev)) { $settings['hooks'][$ev] })
+        $settings['hooks'][$ev] = @($cur) + @($add[$ev])
     }
 }
 if ($settings['hooks'].Count -eq 0) { $settings.Remove('hooks') }

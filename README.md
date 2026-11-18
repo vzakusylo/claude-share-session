@@ -262,12 +262,23 @@ into it.
 | [tests/compare-mirror.js](tests/compare-mirror.js) | checks mirrored sessions equal the originals |
 | [tests/test-scheduled.ps1](tests/test-scheduled.ps1) | 16 scenario checks for task mirroring, on a copy of your data |
 
+| [tests/test-core.ps1](tests/test-core.ps1) | 65 checks on a synthetic fixture: accounts, mirroring, project keys, status, handoff, briefing, registration, hooks, installer, CLI |
+| [tests/run-all.ps1](tests/run-all.ps1) | runs every suite; real-data suites only if the desktop app data exists |
+
 Run the tests:
 
 ```powershell
-pwsh -NoProfile -File tests\test-scheduled.ps1 -Work $env:TEMP\sharework-test
-node tests\compare-mirror.js "$env:LOCALAPPDATA\Claude-Data\<claude_folder>\claude-code-sessions"
+pwsh -NoProfile -File tests/run-all.ps1                 # everything available on this machine
+pwsh -NoProfile -File tests/run-all.ps1 -SyntheticOnly  # no real data touched (what CI runs)
 ```
+
+| Suite | Data | What it checks |
+|---|---|---|
+| `test-core.ps1` | synthetic, temp folder | 65 checks: account discovery, create/update/skip rules, account-bound fields, unicode, ISO dates, mtime, archived/excluded, corrupt files, worktree → repo, status cap/dedupe, handoff front matter, briefing content/limits/age, auto-registration, hooks fail-open and speed, installer idempotency and uninstall, CLI |
+| `test-scheduled.ps1` | copy of your real data | 16 scheduled-task scenarios: create, idempotent, run state, rename, newest config, latest run wins, one-time tasks, active account never written, deletes |
+| `compare-mirror.js` | your real data, read-only | every mirrored session equals its original except account fields (in-flight sessions skipped) |
+
+GitHub Actions runs the synthetic suite on Windows, macOS and Linux for every push.
 
 ## Limitations
 

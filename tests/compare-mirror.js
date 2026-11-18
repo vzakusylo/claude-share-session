@@ -20,9 +20,12 @@ for (const acct of fs.readdirSync(root)) {
   }
 }
 const strip = o => JSON.stringify(Object.fromEntries(Object.entries(o).filter(([k]) => !BOUND.has(k)).sort(([a], [b]) => a < b ? -1 : 1)));
-let pairs = 0, bad = 0;
+// sessions changed in the last 2 minutes may still be waiting for the background push: not a defect
+const IN_FLIGHT_MS = 2 * 60 * 1000;
+let pairs = 0, bad = 0, inFlight = 0;
 for (const [f, copies] of Object.entries(byName)) {
   if (copies.length < 2) continue;
+  if (Date.now() - Math.max(...copies.map(c => c.mtime)) < IN_FLIGHT_MS) { inFlight++; continue; }
   pairs++;
   const [a, b] = copies;
   if (strip(a.j) !== strip(b.j)) {
@@ -32,5 +35,5 @@ for (const [f, copies] of Object.entries(byName)) {
     console.log('DIFF', f, diff.join(','));
   }
 }
-console.log(`pairs=${pairs} different=${bad}`);
+console.log(`pairs=${pairs} different=${bad} skipped-in-flight=${inFlight}`);
 process.exit(bad ? 1 : 0);
