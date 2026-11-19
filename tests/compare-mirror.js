@@ -21,11 +21,14 @@ for (const acct of fs.readdirSync(root)) {
 }
 const strip = o => JSON.stringify(Object.fromEntries(Object.entries(o).filter(([k]) => !BOUND.has(k)).sort(([a], [b]) => a < b ? -1 : 1)));
 // sessions changed in the last 2 minutes may still be waiting for the background push: not a defect
-const IN_FLIGHT_MS = 2 * 60 * 1000;
+// (a long turn can run for many minutes before its end-of-turn push), nor is the session running this check
+const IN_FLIGHT_MS = 10 * 60 * 1000;
+const SELF = process.env.CLAUDE_CODE_SESSION_ID;
 let pairs = 0, bad = 0, inFlight = 0;
 for (const [f, copies] of Object.entries(byName)) {
   if (copies.length < 2) continue;
-  if (Date.now() - Math.max(...copies.map(c => c.mtime)) < IN_FLIGHT_MS) { inFlight++; continue; }
+  if (Date.now() - Math.max(...copies.map(c => c.mtime)) < IN_FLIGHT_MS ||
+      (SELF && copies.some(c => c.j.cliSessionId === SELF))) { inFlight++; continue; }
   pairs++;
   const [a, b] = copies;
   if (strip(a.j) !== strip(b.j)) {

@@ -12,6 +12,7 @@ New-Item -ItemType Directory $Work | Out-Null
 $sessions = Join-Path $Work 'sessions'
 $env:SHAREWORK_SESSIONS_ROOT = $sessions
 $env:SHAREWORK_HOME = Join-Path $Work 'home'
+$env:SHAREWORK_CLAUDE_JSON = Join-Path $Work 'no-cli-login.json'   # behave like a machine without a CLI login (CI)
 foreach ($v in 'CLAUDE_CODE_ACCOUNT_UUID', 'CLAUDE_CODE_ORGANIZATION_UUID', 'CLAUDE_CODE_USER_EMAIL', 'SHAREWORK_NO_PUSH') { Remove-Item "env:$v" -ErrorAction SilentlyContinue }
 Import-Module (Join-Path $repo 'src/ShareWork.psm1') -Force
 
@@ -216,6 +217,8 @@ Check 'uninstall: our skills removed, foreign skill folders kept' (-not (Test-Pa
 # ---------- CLI ----------------------------------------------------------------------------------
 $o = & $pwsh -NoProfile -File (Join-Path $repo 'share-work.ps1') status 2>&1 | Out-String
 Check 'cli: status runs' ($LASTEXITCODE -eq 0 -and $o -match 'alice' -and $o -match 'bob')
+if ($LASTEXITCODE -ne 0) { "      output: $($o.Trim())" }
+Check 'cli: current account guessed without env or CLI login' ($o -match 'Current account: \S+')
 $o = & $pwsh -NoProfile -File (Join-Path $repo 'share-work.ps1') sync -DryRun 2>&1 | Out-String
 Check 'cli: sync -DryRun runs' ($LASTEXITCODE -eq 0 -and $o -match 'dry run|Nothing to do')
 $o = & $pwsh -NoProfile -File (Join-Path $repo 'share-work.ps1') name 2222 bobby 2>&1 | Out-String

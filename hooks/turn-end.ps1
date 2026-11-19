@@ -22,7 +22,11 @@ try {
         $q = { param($s) "'" + ($s -replace "'", "'\''") + "'" }
         $cmd = "nohup $(& $q $exe) -NoLogo -NoProfile -NonInteractive -File $(& $q $script) after-turn -CliSessionId $(& $q $sid) -DelaySeconds 6"
         if ($cwd) { $cmd += " -Cwd $(& $q $cwd)" }
-        Start-Process -FilePath '/bin/sh' -ArgumentList @('-c', "$cmd >/dev/null 2>&1 &") | Out-Null
+        # ProcessStartInfo.ArgumentList passes argv as-is (Start-Process re-splits the string on Unix)
+        $psi = [System.Diagnostics.ProcessStartInfo]::new('/bin/sh')
+        $psi.ArgumentList.Add('-c'); $psi.ArgumentList.Add("$cmd >/dev/null 2>&1 &")
+        $psi.UseShellExecute = $false
+        [System.Diagnostics.Process]::Start($psi).WaitForExit(5000) | Out-Null   # sh exits at once, the child keeps running
     }
 } catch {
     try { Import-Module (Join-Path $PSScriptRoot '../src/ShareWork.psm1'); Write-SwLog "$Event hook error: $($_.Exception.Message)" } catch { }
