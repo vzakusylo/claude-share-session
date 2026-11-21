@@ -5,6 +5,7 @@
 **Switch Claude accounts. Keep working on the same project.**
 
 [![tests](https://github.com/vzakusylo/claude-share-session/actions/workflows/tests.yml/badge.svg)](https://github.com/vzakusylo/claude-share-session/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/vzakusylo/claude-share-session)](https://github.com/vzakusylo/claude-share-session/releases/latest)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Windows](https://img.shields.io/badge/Windows-tested-0078D6?logo=windows)
 ![macOS](https://img.shields.io/badge/macOS-beta-999999?logo=apple)

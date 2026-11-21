@@ -1,0 +1,33 @@
+name: Bug report
+description: Something does not sync or behaves wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please remove e-mails, account ids and private paths from anything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you saw instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Other]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Claude desktop app, Claude Code (`claude --version`), PowerShell (`$PSVersionTable.PSVersion`)
+      placeholder: "desktop 4.x, Claude Code 2.x, PowerShell 7.x"
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `share-work status` and the last lines of `share-work log`
+      render: text

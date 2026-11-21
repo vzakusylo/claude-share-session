@@ -1,0 +1,14 @@
+name: Feature request
+description: Something else that should be shared between accounts
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you want to keep in sync, and why?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Ideas for how it could work (optional)
