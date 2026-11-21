@@ -33,7 +33,7 @@ $script:TaskRunStateKeys = @('lastRunAt', 'lastScheduledFor')
 
 
 # Each file holds one area; order matters only for readability (functions resolve at call time).
-foreach ($part in 'Config', 'Accounts', 'Projects', 'Sessions', 'ScheduledTasks', 'Environment', 'Sync', 'Status', 'Handoffs', 'Briefing') {
+foreach ($part in 'Config', 'Accounts', 'Projects', 'Sessions', 'ScheduledTasks', 'Environment', 'Sync', 'Status', 'Handoffs', 'Briefing', 'Usage') {
     . (Join-Path $PSScriptRoot "ShareWork/$part.ps1")
 }
 

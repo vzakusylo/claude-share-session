@@ -28,6 +28,14 @@ try {
         $psi.UseShellExecute = $false
         [System.Diagnostics.Process]::Start($psi).WaitForExit(5000) | Out-Null   # sh exits at once, the child keeps running
     }
+    # usage: warn in the app when this account is at, or predicted to reach, its limit (cached data only, no network)
+    if ($Event -eq 'Stop') {
+        try {
+            Import-Module (Join-Path $PSScriptRoot '../src/ShareWork.psm1') -Force
+            $me = Get-SwCurrentAccount
+            if ($me) { $msg = Get-SwSwitchNotice -Me $me; if ($msg) { @{ systemMessage = $msg } | ConvertTo-Json -Compress } }
+        } catch { }
+    }
 } catch {
     try { Import-Module (Join-Path $PSScriptRoot '../src/ShareWork.psm1'); Write-SwLog "$Event hook error: $($_.Exception.Message)" } catch { }
 }

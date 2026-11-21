@@ -313,6 +313,82 @@ New-Index $A $OA 'act1' | Out-Null; New-Index $B $OB 'act1' | Out-Null; New-Tomb
 $rows = @(Sync-SwTombstones -From $bob -To @($alice3) -Policy $polA)
 Check 'all accounts: account open in the app is never cleaned while open' ((Test-Path (Join-Path $sessions "$A/$OA/local_act1.json")) -and $rows.Count -eq 0)
 
+# ---------- usage: tracking, prediction, switch recommendation ------------------------------------
+$now = [datetime]::new(2026, 11, 21, 19, 1, 0, [DateTimeKind]::Local)        # a Saturday
+$ut = "Plan usage limits · Pro`n5-hour limit`nResets at 8:10 PM`n23%`nWeekly · all models`nResets Tue 11:00 PM`n75%`nWeekly · Fable only`nResets Tue 11:00 PM`n12%"
+$u = ConvertFrom-SwUsageText -Text $ut -Now $now
+Check 'usage parse: 5-hour and weekly percentages' ($u['fiveHour']['pct'] -eq 23 -and $u['sevenDay']['pct'] -eq 75)
+Check 'usage parse: "Resets at 8:10 PM" -> today 20:10' (([datetime]$u['fiveHour']['resetsAt']).ToLocalTime() -eq $now.Date.AddHours(20).AddMinutes(10))
+Check 'usage parse: "Resets Tue 11:00 PM" -> next Tuesday 23:00' (([datetime]$u['sevenDay']['resetsAt']).ToLocalTime() -eq $now.Date.AddDays(3).AddHours(23))
+Check 'usage parse: per-model weekly line does not replace all-models' ($u['sevenDay']['pct'] -eq 75)
+Check 'usage parse: time already past -> tomorrow' ((ConvertFrom-SwResetText 'Resets at 8:00 AM' $now) -eq $now.Date.AddDays(1).AddHours(8))
+Check 'usage parse: "in 2 hr 5 min"' ((ConvertFrom-SwResetText 'Resets in 2 hr 5 min' $now) -eq $now.AddHours(2).AddMinutes(5))
+Check 'usage parse: text without usage -> empty' ((ConvertFrom-SwUsageText -Text 'hello' -Now $now).Count -eq 0)
+$api = ConvertFrom-SwApiUsage '{"five_hour":{"utilization":42.0,"resets_at":"2026-11-21T20:00:00+00:00"},"seven_day":{"utilization":10,"resets_at":null},"extra_usage":null}'
+Check 'usage api: claude-swap fields five_hour/seven_day utilization + resets_at' ($api['fiveHour']['pct'] -eq 42 -and $api['fiveHour']['resetsAt'] -like '2026-11-21T20:00:00*' -and $api['sevenDay']['pct'] -eq 10 -and -not $api['sevenDay']['resetsAt'])
+
+$ua = [pscustomobject]@{ Uuid = 'u-aaaa'; Name = 'ua' }; $ub = [pscustomobject]@{ Uuid = 'u-bbbb'; Name = 'ub' }; $uc = [pscustomobject]@{ Uuid = 'u-cccc'; Name = 'uc' }; $ud = [pscustomobject]@{ Uuid = 'u-dddd'; Name = 'ud' }
+$nowU = $now.ToUniversalTime()
+$r5 = $nowU.AddHours(2).ToString('o'); $r7 = $nowU.AddDays(3).ToString('o')
+Add-SwUsageSnapshot $ua @{ fiveHour = @{ pct = 40; resetsAt = $r5 }; sevenDay = @{ pct = 50; resetsAt = $r7 } } -Now $now.AddHours(-1) | Out-Null
+Add-SwUsageSnapshot $ua @{ fiveHour = @{ pct = 80; resetsAt = $r5 }; sevenDay = @{ pct = 52; resetsAt = $r7 } } -Now $now | Out-Null
+$f = Get-SwUsageForecast $ua $nowU
+Check 'forecast: rate from two snapshots of the same window (40%/h)' ($f.FiveHour.RatePerHour -eq 40)
+Check 'forecast: predicts the 90% line in 15 min' ([math]::Abs(($f.FiveHour.EtaLine - $nowU).TotalMinutes - 15) -lt 1)
+Check 'forecast: will not last to the reset' ($f.FiveHour.WillLast -eq $false)
+Check 'forecast: binding window = closest to its line' ($f.Binding.Window -eq 'fiveHour' -and $f.Headroom -eq 10)
+Add-SwUsageSnapshot $ub @{ fiveHour = @{ pct = 10; resetsAt = $r5 }; sevenDay = @{ pct = 30; resetsAt = $r7 } } -Now $now | Out-Null
+Add-SwUsageSnapshot $uc @{ fiveHour = @{ pct = 5; resetsAt = $r5 }; sevenDay = @{ pct = 85; resetsAt = $r7 } } -Now $now | Out-Null
+$rec = Get-SwSwitchRecommendation -Me $ua -Accounts @($ua, $ub, $uc, $ud) -NowUtc $nowU
+Check 'recommend: "soon" when the line is predicted within 30 min' ($rec.Level -eq 'soon' -and $rec.Reason -match 'predicted')
+Check 'recommend: best = most headroom under every line (ub 60% beats uc 5%)' ($rec.Target.Name -eq 'ub')
+Add-SwUsageSnapshot $ua @{ fiveHour = @{ pct = 93; resetsAt = $r5 }; sevenDay = @{ pct = 52; resetsAt = $r7 } } -Now $now | Out-Null
+$rec = Get-SwSwitchRecommendation -Me $ua -Accounts @($ua, $ub, $uc, $ud) -NowUtc $nowU
+Check 'recommend: "now" at/over the line' ($rec.Level -eq 'now' -and $rec.Target.Name -eq 'ub')
+$rec = Get-SwSwitchRecommendation -Me $ub -Accounts @($ua, $ub, $uc) -NowUtc $nowU
+Check 'recommend: ok when far from the line' ($rec.Level -eq 'ok' -and -not (Get-SwSwitchMessage -Me $ub -Accounts @($ua, $ub, $uc) -NowUtc $nowU))
+$f = Get-SwUsageForecast $ua $nowU.AddHours(3)
+Check 'forecast: after the reset the window is empty again' ($f.FiveHour.Pct -eq 0 -and $f.FiveHour.Basis -eq 'reset passed')
+$rec = Get-SwSwitchRecommendation -Me $ua -Accounts @($ua, $ud) -NowUtc $nowU
+Check 'recommend: account without data offered as unknown' ($rec.Target.Name -eq 'ud' -and $rec.TargetReason -match 'unknown')
+Add-SwUsageSnapshot $ub @{ fiveHour = @{ pct = 95; resetsAt = $nowU.AddMinutes(30).ToString('o') } } -Now $now | Out-Null
+Add-SwUsageSnapshot $uc @{ fiveHour = @{ pct = 99; resetsAt = $nowU.AddMinutes(90).ToString('o') } } -Now $now | Out-Null
+$rec = Get-SwSwitchRecommendation -Me $ua -Accounts @($ua, $ub, $uc) -NowUtc $nowU
+Check 'recommend: all over their lines -> the one that resets first' ($rec.Target.Name -eq 'ub' -and $rec.TargetReason -match 'resets first')
+$msg = Get-SwSwitchNotice -Me $ua -Accounts @($ua, $ub) -NowUtc $nowU
+Check 'notice: message names the account to switch to and /handoff' ($msg -match 'Switch accounts now' -and $msg -match 'ub' -and $msg -match '/handoff')
+Check 'notice: not repeated within 20 min' (-not (Get-SwSwitchNotice -Me $ua -Accounts @($ua, $ub) -NowUtc $nowU.AddMinutes(5)))
+Check 'notice: repeated after 20 min' ([bool](Get-SwSwitchNotice -Me $ua -Accounts @($ua, $ub) -NowUtc $nowU.AddMinutes(25)))
+
+# token spending: counted once per API response, per account, from the last position on
+$tp = Join-Path $Work 'tok.jsonl'
+$mk = { param($ts, $rid, $out) (@{ type = 'assistant'; timestamp = $ts; requestId = $rid; message = @{ usage = @{ input_tokens = 10; output_tokens = $out; cache_read_input_tokens = 1000; cache_creation_input_tokens = 0 } } } | ConvertTo-Json -Compress -Depth 5) }
+[IO.File]::WriteAllLines($tp, @((& $mk '2026-11-21T17:00:00Z' 'r1' 100), (& $mk '2026-11-21T17:00:01Z' 'r1' 100), (& $mk '2026-11-21T17:05:00Z' 'r2' 50), '{"type":"user"}'))
+$row = Add-SwTokenUsage -Account $ua -CliSessionId 'tok' -TranscriptPath $tp
+Check 'tokens: one API response written twice is counted once' ($row.messages -eq 2 -and $row.output -eq 150)
+Check 'tokens: weighted = in + out + cache write + 10% cache read' ($row.weighted -eq (20 + 150 + 200))
+Check 'tokens: nothing new -> nothing added' ($null -eq (Add-SwTokenUsage -Account $ua -CliSessionId 'tok' -TranscriptPath $tp))
+Add-Content $tp (& $mk '2026-11-21T17:10:00Z' 'r3' 30)
+$row = Add-SwTokenUsage -Account $ub -CliSessionId 'tok' -TranscriptPath $tp
+Check 'tokens: next turn goes to the account that ran it' ($row.output -eq 30 -and @(Get-SwTokenRows $ub ([datetime]'2026-11-21T00:00:00Z')).Count -eq 1)
+# pct-per-token learned from snapshots, then used for the estimate now
+$ue = [pscustomobject]@{ Uuid = 'u-eeee'; Name = 'ue' }
+$t0 = [datetime]::new(2026, 11, 21, 16, 0, 0, [DateTimeKind]::Utc)
+Add-SwUsageSnapshot $ue @{ fiveHour = @{ pct = 10; resetsAt = $t0.AddHours(4).ToString('o') } } -Now $t0.ToLocalTime() | Out-Null
+Add-Content (Join-Path (Get-SwUsageDir) 'tokens-u-eeee.jsonl') ('{"at":"' + $t0.AddMinutes(30).ToString('o') + '","weighted":1000,"output":500}')
+Add-SwUsageSnapshot $ue @{ fiveHour = @{ pct = 20; resetsAt = $t0.AddHours(4).ToString('o') } } -Now $t0.AddHours(1).ToLocalTime() | Out-Null
+Add-Content (Join-Path (Get-SwUsageDir) 'tokens-u-eeee.jsonl') ('{"at":"' + $t0.AddMinutes(90).ToString('o') + '","weighted":500,"output":200}')
+$f = Get-SwUsageForecast $ue $t0.AddMinutes(100)
+Check 'forecast: tokens since the last snapshot raise the estimate (20% + 500 x 0.01)' ($f.FiveHour.Pct -eq 25 -and $f.FiveHour.Basis -match 'tokens since')
+Check 'forecast: rate from the last hour of tokens' ($f.FiveHour.RatePerHour -eq 5)
+
+# CLI: usage paste + usage --json
+$env:CLAUDE_CODE_ACCOUNT_UUID = $A
+$ut | & $pwsh -NoProfile -File (Join-Path $repo 'share-work.ps1') usage paste | Out-Null
+$js = (& $pwsh -NoProfile -File (Join-Path $repo 'share-work.ps1') usage -Json) -join "`n" | ConvertFrom-Json
+Check 'cli usage paste + -Json: schemaVersion 1, current account 23% / 75%' ($js.schemaVersion -eq 1 -and @($js.accounts | Where-Object current)[0].fiveHour.Pct -eq 23 -and @($js.accounts | Where-Object current)[0].sevenDay.Pct -eq 75)
+Remove-Item env:CLAUDE_CODE_ACCOUNT_UUID
+
 # ---------- account switch: merge every account, deletions from ANY account win, debug log ----------
 $cfg = Get-SwConfig; $cfg['debugLog'] = $true; Save-SwConfig $cfg
 $bob3 = $three | Where-Object Uuid -eq $B; $c3 = $three | Where-Object Uuid -eq $C2

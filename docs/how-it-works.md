@@ -70,6 +70,28 @@ atomic writes, backups, `-DryRun`, the account open in the app is never written 
 Out of scope (account-bound): connectors / `remoteMcpServersConfig`, `config.json` `dxt:*` keys, Remote Control,
 Cowork `local-agent-mode-sessions`, credentials.
 
+## Usage and switch advice (`Usage.ps1`)
+
+Same model as [claude-swap](https://github.com/realiti4/claude-swap): two windows per account, `fiveHour` and
+`sevenDay`, each a percentage with a reset time; a switch line (default 90 %, `usageThreshold`,
+`usageWeeklyThreshold` in `accounts.json`); the binding window is the one closest to its line; the "best" target is
+the other account with the most headroom under every line; if all are over, the one that resets first; a reset in
+the past means the window is empty again.
+
+* **Measurements** (`usage/<account-uuid>.json`, last 300): `usage paste` parses the app's Usage page text,
+  `usage set` takes numbers, `usage fetch` calls `GET https://api.anthropic.com/api/oauth/usage`
+  (`anthropic-beta: oauth-2025-04-20`) like claude-swap — only for the account logged in to the Claude Code CLI,
+  because desktop accounts keep their login inside the app. The token is never logged or stored.
+* **Spending**: after every turn, `after-turn` adds the turn's tokens from the transcript to
+  `usage/tokens-<account-uuid>.jsonl` for the account that ran it (one line per turn; one API response counted once;
+  weighted = input + output + cache writes + 10 % of cache reads).
+* **Forecast**: % per token is learned from two measurements in the same window, so the estimate moves between
+  measurements; the rate comes from the last hour of tokens, else from the measurements, else the average since the
+  window started. Gives the time the line and 100 % are reached and whether the window lasts to its reset.
+* **Advice**: "now" at/over the line, "soon" when the line is predicted within `usageWarnMinutes` (30). The `Stop`
+  hook shows it in the app (`systemMessage`, at most every 20 min), `SessionStart` adds it to the briefing.
+  `share-work usage -Json` prints it with `schemaVersion: 1`.
+
 ## Hooks
 
 | Hook | Script | Does |

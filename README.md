@@ -69,6 +69,7 @@ After that it runs by itself: every turn ends with a background sync. Uninstall:
 | resume a session from a terminal | `share-work resume` → `claude --resume <id>` |
 | sync | just switch accounts in the app — the first session of the new account merges all accounts in the background; or run `share-work sync` (add `-DryRun` to preview) |
 | see how a sync went | `share-work log on`, switch accounts, then `share-work log debug`; `share-work log clear` when done |
+| know when to switch before you hit the limit | copy the app's **Usage** page and run `share-work usage paste` (or `usage set 23 75 -FiveHourReset "8:10 PM" -WeeklyReset "Tue 11:00 PM"`); `share-work usage` shows every account, a forecast and the best account to switch to. The app warns you after a turn when the limit is close |
 | check everything | `share-work status` |
 | name an account | `share-work name <uuid-prefix> alice` |
 
@@ -113,7 +114,7 @@ Full internals: [docs/how-it-works.md](docs/how-it-works.md).
 
 | Suite | Runs on | Checks |
 |---|---|---|
-| [`test-core.ps1`](tests/test-core.ps1) | synthetic data — CI on Windows, macOS, Linux | 122: accounts, mirroring rules, pins, account switch, debug log, environment sync, project keys, status, handoff, briefing, hooks, installer, CLI |
+| [`test-core.ps1`](tests/test-core.ps1) | synthetic data — CI on Windows, macOS, Linux | 151: accounts, mirroring rules, pins, account switch, debug log, usage forecast and switch advice, environment sync, project keys, status, handoff, briefing, hooks, installer, CLI |
 | [`test-scheduled.ps1`](tests/test-scheduled.ps1) | a copy of your real data | 16 scheduled-task scenarios |
 | [`compare-mirror.js`](tests/compare-mirror.js) | your real data, read-only | every mirror equals its original |
 
