@@ -38,6 +38,8 @@ function Get-SwConfig {
     if (-not $c.ContainsKey('names')) { $c['names'] = @{} }
     if (-not $c.ContainsKey('excludeCwd')) { $c['excludeCwd'] = @() }
     if (-not $c.ContainsKey('importArchived')) { $c['importArchived'] = $false }
+    if (-not $c.ContainsKey('syncEnvironment')) { $c['syncEnvironment'] = $true }
+    if (-not $c.ContainsKey('environmentExclude')) { $c['environmentExclude'] = @() }
     $c
 }
 

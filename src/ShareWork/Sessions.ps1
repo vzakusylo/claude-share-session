@@ -40,14 +40,25 @@ function Sync-SwSessions {
     $home_ = Get-SwHome
     $result = [System.Collections.Generic.List[object]]::new()
     $srcFiles = Get-ChildItem $From.Dir -Recurse -Filter 'local_*.json' -File -ErrorAction SilentlyContinue
+    $srcTombs = Get-SwTombstoneMap $From
     foreach ($dst in $To) {
         if ($dst.Uuid -eq $From.Uuid) { continue }
         if (-not $dst.PrimaryDir) { continue }
+        $dstTombs = Get-SwTombstoneMap $dst
         foreach ($sf in $srcFiles) {
             $src = Read-SwIndex $sf.FullName
             if (-not $src -or -not $src['cliSessionId']) { continue }
             if ($OnlyCliSessionId -and $src['cliSessionId'] -ne $OnlyCliSessionId) { continue }
             if (Test-SwExcluded $src $cfg) { continue }
+
+            # a session deleted in either account is never copied, re-created or updated,
+            # unless someone worked in it after the deletion
+            $activity = Get-SwSessionActivityMs $src $sf
+            $dead = $false
+            foreach ($id in @(($sf.BaseName -replace '^local_', ''), [string]$src['cliSessionId'])) {
+                foreach ($m in $srcTombs, $dstTombs) { if ($m.ContainsKey($id) -and $m[$id].Ms -ge $activity) { $dead = $true } }
+            }
+            if ($dead) { continue }
 
             $tf = Find-SwIndexFile $dst $sf.Name
             $action = $null; $out = $null

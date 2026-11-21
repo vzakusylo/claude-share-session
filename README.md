@@ -84,6 +84,9 @@ Settings live in `~/.claude/shared-work/accounts.json`: `names`, `emails` (e-mai
 | Transcripts, `CLAUDE.md`, memory, skills, hooks | `~/.claude` | yes, already |
 | Sidebar list | `claude-code-sessions/<account>/<org>/local_*.json` | **no → mirrored** |
 | Scheduled-task list | `claude-code-sessions/<account>/<org>/scheduled-tasks.json` | **no → mirrored** |
+| Session deletions | claude-code-sessions/<account>/<org>/deleted_<id> | **no → mirrored** (session moved to backups) |
+| New-session presets | ccd-session-presets.json (yAccount.<account>) | **no → mirrored** |
+| Installed plugins | plugin-list/<account>/<org>/plugins.json | no, reported by status |
 | Connectors, Remote Control | per account | no, kept per account |
 
 1. **After every turn**, a `Stop` hook starts a background step (the hook itself returns in under a second).
@@ -107,7 +110,7 @@ Full internals: [docs/how-it-works.md](docs/how-it-works.md).
 
 | Suite | Runs on | Checks |
 |---|---|---|
-| [`test-core.ps1`](tests/test-core.ps1) | synthetic data — CI on Windows, macOS, Linux | 66: accounts, mirroring rules, project keys, status, handoff, briefing, hooks, installer, CLI |
+| [`test-core.ps1`](tests/test-core.ps1) | synthetic data — CI on Windows, macOS, Linux | 91: accounts, mirroring rules, environment sync, project keys, status, handoff, briefing, hooks, installer, CLI |
 | [`test-scheduled.ps1`](tests/test-scheduled.ps1) | a copy of your real data | 16 scheduled-task scenarios |
 | [`compare-mirror.js`](tests/compare-mirror.js) | your real data, read-only | every mirror equals its original |
 
@@ -124,7 +127,7 @@ install.ps1 / .sh           install / uninstall hooks + skills
 hooks/                      session-start.ps1, turn-end.ps1
 skills/                     handoff, shared-work
 src/ShareWork.psm1          module entry point
-src/ShareWork/              Config · Accounts · Projects · Sessions · ScheduledTasks · Sync · Status · Handoffs · Briefing
+src/ShareWork/              Config · Accounts · Projects · Sessions · ScheduledTasks · Environment · Sync · Status · Handoffs · Briefing
 tests/                      test-core, test-scheduled, compare-mirror, run-all
 ```
 
@@ -134,6 +137,5 @@ tests/                      test-core, test-scheduled, compare-mirror, run-all
   Tested with Claude desktop 4.23118 and Claude Code 2.1.317 on Windows 11.
 * macOS uses the same code and passes CI, but the desktop folder layout is not yet confirmed on a real Mac —
   if `status` cannot find it, set `SHAREWORK_SESSIONS_ROOT` and please open an issue.
-* Deleting a session is not propagated (it comes back from the other account) — archive instead.
 
 Not affiliated with Anthropic. MIT licensed. Issues and PRs welcome.

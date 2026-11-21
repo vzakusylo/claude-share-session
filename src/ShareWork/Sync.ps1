@@ -30,6 +30,7 @@ function Sync-SwAll {
         $rows += @(Sync-SwScheduledTasks -From $From -To $To -ActiveUuid $Policy.ActiveUuid `
                 -AllowDeletes:($Policy.AllowDeletesFrom -and $Policy.AllowDeletesFrom -eq $From.Uuid) -DryRun:$DryRun)
     }
+    $rows += @(Sync-SwEnvironment -From $From -To $To -DryRun:$DryRun -Policy $Policy)
     $rows
 }
 

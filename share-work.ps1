@@ -57,7 +57,21 @@ switch ($Command) {
         }
         if ($taskRows) { $taskRows | Format-Table -AutoSize | Out-String -Width 200 } else { '  (none)'; '' }
         $policy = Get-SwTaskWritePolicy
-        $pending = foreach ($a in $all) { Sync-SwAll -From $a -To $all -DryRun -Policy $policy }
+        $pending = @(foreach ($a in $all) { Sync-SwAll -From $a -To $all -DryRun -Policy $policy })
+        $missingPlugins = @($pending | Where-Object Action -eq 'plugin-missing')
+        $pending = @($pending | Where-Object Action -ne 'plugin-missing')
+        'Environment:'
+        $envRows = foreach ($a in ($all | Where-Object PrimaryDir)) {
+            $pd = Read-SwJsonFile (Join-Path (Split-Path (Get-SwSessionsRoot) -Parent) 'ccd-session-presets.json')
+            $pc = if ($pd -and $pd['byAccount'] -and $pd['byAccount'][$a.Uuid]) { @($pd['byAccount'][$a.Uuid]['presets']).Count } else { 0 }
+            $pl = Get-SwPluginIds $a
+            [pscustomobject]@{ Account = $a.Name; Presets = $pc; Plugins = $(if ($null -eq $pl) { '?' } else { @($pl).Count }) }
+        }
+        $envRows | Format-Table -AutoSize | Out-String -Width 200
+        $tomb = @($pending | Where-Object { $_.Action -in 'tombstone', 'session-removed' })
+        "Pending session deletions: $(@($tomb | Where-Object Action -eq 'tombstone').Count)"
+        foreach ($m in $missingPlugins) { "  plugin '$($m.Title)' is installed in $($m.From) but not in $($m.To)" }
+        ''
         if ($pending) {
             'Not mirrored yet (run `sync` or `push`):'
             $pending | Group-Object From, To, Action | Select-Object Count, Name | Format-Table -AutoSize | Out-String

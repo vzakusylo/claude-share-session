@@ -14,7 +14,7 @@ The desktop folder is auto-detected; override with `SHAREWORK_SESSIONS_ROOT`. Th
 `~/.claude/shared-work` (override: `SHAREWORK_HOME`):
 
 ```
-accounts.json          names, emails, orgs, excludeCwd, importArchived
+accounts.json          names, emails, orgs, excludeCwd, importArchived, syncEnvironment, environmentExclude
 status/<account>.json  last 40 sessions of that account (written only by that account)
 handoffs/<project>/    <yyyyMMdd-HHmmss>-<account>.md
 sched/<account>.json   task-id snapshot used to detect deletions
@@ -47,6 +47,25 @@ runs only the signed-in account's registry, keeps it in memory and rewrites the 
     deletions made in the open account are propagated (snapshot in `sched/<account>.json`);
   * plain terminal, app closed: write all accounts, never propagate deletions;
   * plain terminal, app running: skip tasks (it is unknown which account is open).
+
+## Environment sync (`Environment.ps1`)
+
+Paths relative to the desktop data folder (parent of `claude-code-sessions`). Same rules as above: newest wins,
+atomic writes, backups, `-DryRun`, the account open in the app is never written (`Get-SwTaskWritePolicy`).
+`accounts.json`: `syncEnvironment` (default `true`) and `environmentExclude` (any of `tombstones`, `archive`,
+`presets`, `toggles`, `plugins`).
+
+| Item | Path | Key | Rule |
+|---|---|---|---|
+| Session deletions | `claude-code-sessions/<A>/<O>/deleted_<id>` (content: deletion time, epoch ms; `<id>` is the `local_` uuid or the `cliSessionId`) | `<id>` | Missing tombstones are copied. For every tombstone a target knows (copied **or its own**), a still-existing session is **moved to `backups/`** unless it had real activity after the deletion (`lastActivityAt` / `lastTurnEdgeAt` / `latestUserFrameAt` — not the file mtime, which the app rewrites on its own). `Sync-SwSessions` never copies, re-creates or updates a session tombstoned in the source or the target. The account open in the app is cleaned the next time another account is active, or when `sync` runs with the app closed. Corrupt tombstones are ignored. |
+| Archive index | `claude-code-sessions/<A>/<O>/archived-sessions.idx` | session id | Union. The real file format was not inspected: only one id per line or a JSON array of strings is handled; anything else is left untouched. |
+| Session presets | `ccd-session-presets.json` → `byAccount.<A>.presets[]` (shared file) | `id` | Upsert, newest `lastUsedAt`/`createdAt` wins. `builtIns` and `seededFromDraft` are never touched; only non-open accounts' entries are written, the file is re-read right before the write. |
+| Plugins | `plugin-list/<A>/<O>/plugins.json` | plugin id | **Report only** (`status` shows plugins missing in an account); the schema is not verified, nothing is written. |
+| Tool toggles | `mcp-user-tool-toggles.json` → `owners.<A>` | account uuid | Created for accounts that have no entry yet; keys of orgs or connectors are skipped. |
+| Sidebar groups/sections | — | — | No backing file identified on disk; not synchronised. |
+
+Out of scope (account-bound): connectors / `remoteMcpServersConfig`, `config.json` `dxt:*` keys, Remote Control,
+Cowork `local-agent-mode-sessions`, credentials.
 
 ## Hooks
 

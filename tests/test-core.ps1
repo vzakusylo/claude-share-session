@@ -214,6 +214,126 @@ $s = Get-Content (Join-Path $cd 'settings.json') -Raw | ConvertFrom-Json -AsHash
 Check 'uninstall: only our hooks removed' (@($s.hooks.Stop).Count -eq 1 -and -not $s.hooks.ContainsKey('SessionStart') -and ($s.hooks.Stop | ConvertTo-Json -Depth 10) -match 'mine')
 Check 'uninstall: our skills removed, foreign skill folders kept' (-not (Test-Path (Join-Path $cd 'skills/handoff')) -and (Test-Path (Join-Path $cd 'skills/handoff-foreign')))
 
+# ---------- environment sync ------------------------------------------------------------------------
+$pol = [pscustomobject]@{ Enabled = $true; ActiveUuid = $null; AllowDeletesFrom = $null; Note = $null }
+$polB = [pscustomobject]@{ Enabled = $true; ActiveUuid = $B; AllowDeletesFrom = $B; Note = $null }
+$all = @(Get-SwAccounts); $alice = $all | Where-Object Uuid -eq $A; $bob = $all | Where-Object Uuid -eq $B
+foreach ($n in 'd1', 'd2', 'd3', 'd4') { New-Index $A $OA $n | Out-Null }
+Sync-SwSessions -From $alice -To @($bob) | Out-Null
+$nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+function New-Tomb([string]$acct, [string]$org, [string]$id, [long]$ms) { [IO.File]::WriteAllText((Join-Path $sessions "$acct/$org/deleted_$id"), "$ms") }
+New-Tomb $A $OA 'd1' $nowMs; New-Tomb $A $OA 'cli-d2' $nowMs; New-Tomb $A $OA 'bad' 0; [IO.File]::WriteAllText((Join-Path $sessions "$A/$OA/deleted_junk"), 'not a number')
+$d3 = Join-Path $sessions "$B/$OB/local_d3.json"
+# bob really worked in d3 after alice deleted it: real activity (lastActivityAt) is newer than the deletion
+$j = Read-SwIndex $d3; $j['lastActivityAt'] = $nowMs; [IO.File]::WriteAllText($d3, ($j | ConvertTo-Json -Depth 10))
+New-Tomb $A $OA 'd3' ($nowMs - 600000)
+New-Tomb $A $OA 'd4' $nowMs
+
+$dry = @(Sync-SwTombstones -From $alice -To @($bob) -DryRun -Policy $pol)
+Check 'tombstone: dry run reports, writes nothing' ($dry.Count -gt 0 -and (Test-Path (Join-Path $sessions "$B/$OB/local_d1.json")) -and -not (Test-Path (Join-Path $sessions "$B/$OB/deleted_d1")))
+$rows = @(Sync-SwTombstones -From $alice -To @($bob) -Policy $polB)
+Check 'tombstone: open account is not written' ($rows.Count -eq 0 -and (Test-Path (Join-Path $sessions "$B/$OB/local_d1.json")))
+$rows = @(Sync-SwTombstones -From $alice -To @($bob) -Policy $pol)
+Check 'tombstone: copied to the other account' ((Test-Path (Join-Path $sessions "$B/$OB/deleted_d1")) -and (Test-Path (Join-Path $sessions "$B/$OB/deleted_cli-d2")))
+Check 'tombstone: session moved to backups, not deleted' (-not (Test-Path (Join-Path $sessions "$B/$OB/local_d1.json")) -and -not (Test-Path (Join-Path $sessions "$B/$OB/local_d2.json")) -and @(Get-ChildItem (Join-Path $env:SHAREWORK_HOME 'backups') -Recurse -Filter '*local_d1.json').Count -ge 1)
+Check 'tombstone: matched by cliSessionId too' (@($rows | Where-Object Action -eq 'session-removed').Count -eq 3 -or @($rows | Where-Object Action -eq 'session-removed').Count -ge 2)
+Check 'tombstone: newer activity in target keeps its session' ((Test-Path $d3) -and -not (Test-Path (Join-Path $sessions "$B/$OB/deleted_d3")))
+Check 'tombstone: corrupt tombstones skipped' (-not (Test-Path (Join-Path $sessions "$B/$OB/deleted_junk")))
+Check 'tombstone: idempotent second run' (@(Sync-SwTombstones -From $alice -To @($bob) -Policy $pol).Count -eq 0)
+Remove-Item (Join-Path $sessions "$A/$OA/local_d1.json"), (Join-Path $sessions "$A/$OA/local_d2.json") -ErrorAction SilentlyContinue
+New-Index $A $OA 'd1' | Out-Null
+$rows = @(Sync-SwSessions -From $alice -To @($bob))
+Check 'sessions: tombstoned session is not recreated' (-not (Test-Path (Join-Path $sessions "$B/$OB/local_d1.json")) -and @($rows | Where-Object CliSessionId -in 'cli-d1', 'cli-d2').Count -eq 0)
+Check 'sessions: idempotent after tombstones' (@(Sync-SwSessions -From $alice -To @($bob)).Count -eq 0)
+
+# ---------- deletion bugs (regression) ------------------------------------------------------------
+# Bug 1: an account already has the tombstone, but an older sync brought the session file back.
+foreach ($n in 'r1', 'r2') { New-Index $B $OB $n | Out-Null }          # alive in bob, old activity
+New-Tomb $B $OB 'r1' $nowMs; New-Tomb $B $OB 'cli-r2' $nowMs            # ...and bob's own tombstones
+$rows = @(Sync-SwTombstones -From $alice -To @($bob) -Policy $pol)
+Check 'bug1: resurrected session removed when target already has the tombstone' (-not (Test-Path (Join-Path $sessions "$B/$OB/local_r1.json")) -and -not (Test-Path (Join-Path $sessions "$B/$OB/local_r2.json")))
+Check 'bug1: removal reported, no duplicate tombstone written' (@($rows | Where-Object Action -eq 'session-removed').Count -eq 2 -and @($rows | Where-Object { $_.Action -eq 'tombstone' -and $_.Title -in 'r1', 'cli-r2' }).Count -eq 0)
+
+# Bug 2: the app rewrote the file (new mtime) but nobody worked in the session after the deletion.
+$p = New-Index $B $OB 'm1'                                             # activity = old fixed fixture time
+New-Tomb $A $OA 'm1' ($nowMs - 3600000)                               # deleted an hour ago
+(Get-Item $p).LastWriteTimeUtc = (Get-Date).ToUniversalTime()        # file touched just now
+$rows = @(Sync-SwTombstones -From $alice -To @($bob) -Policy $pol)
+Check 'bug2: file mtime newer than deletion does not keep the session' (-not (Test-Path $p) -and (Test-Path (Join-Path $sessions "$B/$OB/deleted_m1")))
+
+# a deleted session alive in the source account is not pushed anywhere (source has its own tombstone)
+New-Index $A $OA 'z1' | Out-Null; New-Tomb $A $OA 'z1' $nowMs
+$rows = @(Sync-SwSessions -From $alice -To @($bob))
+Check 'sessions: session tombstoned in the source is not pushed' (-not (Test-Path (Join-Path $sessions "$B/$OB/local_z1.json")) -and @($rows | Where-Object CliSessionId -eq 'cli-z1').Count -eq 0)
+
+# a deleted session is not updated in a target that still has it either
+New-Index $B $OB 'u1' | Out-Null; $up = New-Index $A $OA 'u1' @{ title = 'changed' } ((Get-Date).AddMinutes(5))
+New-Tomb $A $OA 'u1' $nowMs
+$rows = @(Sync-SwSessions -From $alice -To @($bob))
+Check 'sessions: tombstoned session is not updated in the target' (@($rows | Where-Object CliSessionId -eq 'cli-u1').Count -eq 0)
+
+# deleted in one account -> gone in ALL others (three accounts, two of them targets)
+$C2 = '44444444-4444-4444-8444-444444444444'; $OC2 = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+New-Item -ItemType Directory (Join-Path $sessions "$C2/$OC2") -Force | Out-Null
+New-Index $C2 $OC2 'seed' | Out-Null
+foreach ($acct in @(@($A, $OA), @($B, $OB), @($C2, $OC2))) { New-Index $acct[0] $acct[1] 'all1' | Out-Null }
+$three = @(Get-SwAccounts | Where-Object { $_.Uuid -in $A, $B, $C2 })
+$alice3 = $three | Where-Object Uuid -eq $A
+Remove-Item (Join-Path $sessions "$A/$OA/local_all1.json"); New-Tomb $A $OA 'all1' $nowMs    # user deletes it in alice
+$rows = @(Sync-SwAll -From $alice3 -To $three -Policy $pol)
+Check 'all accounts: deletion in one account removes the session in every other account' (-not (Test-Path (Join-Path $sessions "$B/$OB/local_all1.json")) -and -not (Test-Path (Join-Path $sessions "$C2/$OC2/local_all1.json")))
+Check 'all accounts: every other account gets the tombstone' ((Test-Path (Join-Path $sessions "$B/$OB/deleted_all1")) -and (Test-Path (Join-Path $sessions "$C2/$OC2/deleted_all1")))
+$rows = @(foreach ($acc3 in $three) { Sync-SwAll -From $acc3 -To $three -Policy $pol })   # not $a: PowerShell names ignore case ($A)
+Check 'all accounts: full two-way sync does not bring it back' (-not @(Get-ChildItem $sessions -Recurse -Filter 'local_all1.json').Count)
+$polA = [pscustomobject]@{ Enabled = $true; ActiveUuid = $A; AllowDeletesFrom = $A; Note = $null }
+New-Index $A $OA 'act1' | Out-Null; New-Index $B $OB 'act1' | Out-Null; New-Tomb $B $OB 'act1' $nowMs
+$rows = @(Sync-SwTombstones -From $bob -To @($alice3) -Policy $polA)
+Check 'all accounts: account open in the app is never cleaned while open' ((Test-Path (Join-Path $sessions "$A/$OA/local_act1.json")) -and $rows.Count -eq 0)
+Remove-Item (Join-Path $sessions $C2) -Recurse -Force
+
+# presets
+$pf = Join-Path $Work 'ccd-session-presets.json'
+function Save-Presets($d) { [IO.File]::WriteAllText($pf, ($d | ConvertTo-Json -Depth 10)) }
+function Load-Presets { Get-Content $pf -Raw | ConvertFrom-Json -AsHashtable -DateKind String }
+Save-Presets @{ builtIns = @(@{ id = 'builtin1'; name = 'Built' }); seededFromDraft = $true
+    byAccount = @{ $A = @{ presets = @(@{ id = 'p1'; name = 'one'; createdAt = 1793000000000 }) }; $B = @{ presets = @() } } }
+$before = Load-Presets
+$dry = @(Sync-SwPresets -From $alice -To @($bob) -DryRun -Policy $pol)
+Check 'presets: dry run writes nothing' ($dry.Count -eq 1 -and @((Load-Presets).byAccount[$B].presets).Count -eq 0)
+Check 'presets: open account is not written' (@(Sync-SwPresets -From $alice -To @($bob) -Policy $polB).Count -eq 0 -and @((Load-Presets).byAccount[$B].presets).Count -eq 0)
+$rows = @(Sync-SwPresets -From $alice -To @($bob) -Policy $pol)
+$d = Load-Presets
+Check 'presets: created in A appears in B' ($rows[0].Action -eq 'preset-create' -and $d.byAccount[$B].presets[0].id -eq 'p1' -and $d.byAccount[$B].presets[0].name -eq 'one')
+Check 'presets: builtIns and seededFromDraft untouched' ((($d.builtIns | ConvertTo-Json -Compress) -eq ($before.builtIns | ConvertTo-Json -Compress)) -and $d.seededFromDraft -eq $true)
+Check 'presets: idempotent' (@(Sync-SwPresets -From $alice -To @($bob) -Policy $pol).Count -eq 0)
+$d.byAccount[$B].presets[0].name = 'edited'; $d.byAccount[$B].presets[0].lastUsedAt = 1793100000000; Save-Presets $d
+$rows = @(Sync-SwPresets -From $bob -To @($alice) -Policy $pol)
+Check 'presets: later edit in B flows back to A' ($rows[0].Action -eq 'preset-update' -and (Load-Presets).byAccount[$A].presets[0].name -eq 'edited')
+Check 'presets: older source does not overwrite' (@(Sync-SwPresets -From $alice -To @($bob) -Policy $pol).Count -eq 0)
+[IO.File]::WriteAllText($pf, '{ broken')
+Check 'presets: corrupt file skipped, untouched' (@(Sync-SwPresets -From $alice -To @($bob) -Policy $pol).Count -eq 0 -and (Get-Content $pf -Raw) -eq '{ broken')
+
+# archive index (line format)
+[IO.File]::WriteAllText((Join-Path $sessions "$A/$OA/archived-sessions.idx"), "s1`ns2`n"); [IO.File]::WriteAllText((Join-Path $sessions "$B/$OB/archived-sessions.idx"), "s2`n")
+$rows = @(Sync-SwArchiveIndex -From $alice -To @($bob) -Policy $pol)
+Check 'archive index: union written' ($rows.Count -eq 1 -and ((Get-Content (Join-Path $sessions "$B/$OB/archived-sessions.idx")) -join ',') -eq 's2,s1')
+Check 'archive index: idempotent' (@(Sync-SwArchiveIndex -From $alice -To @($bob) -Policy $pol).Count -eq 0)
+
+# plugins (report only)
+foreach ($p in "$A/$OA", "$B/$OB") { New-Item -ItemType Directory (Join-Path $Work "plugin-list/$p") -Force | Out-Null }
+[IO.File]::WriteAllText((Join-Path $Work "plugin-list/$A/$OA/plugins.json"), (@{ plugins = @(@{ id = 'pl-shared' }, @{ id = 'pl-only-a' }) } | ConvertTo-Json -Depth 5))
+[IO.File]::WriteAllText((Join-Path $Work "plugin-list/$B/$OB/plugins.json"), (@{ plugins = @(@{ id = 'pl-shared' }) } | ConvertTo-Json -Depth 5))
+$rows = @(Sync-SwPlugins -From $alice -To @($bob))
+Check 'plugins: plugin only in A is reported' ($rows.Count -eq 1 -and $rows[0].Action -eq 'plugin-missing' -and $rows[0].Title -eq 'pl-only-a')
+Check 'plugins: nothing written' ((Get-Content (Join-Path $Work "plugin-list/$B/$OB/plugins.json") -Raw) -notmatch 'pl-only-a')
+$o = & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $repo 'share-work.ps1') status 2>&1 | Out-String
+Check 'status: environment section lists missing plugin' ($o -match 'Environment:' -and $o -match "pl-only-a.*alice.*bob")
+$cfg = Get-SwConfig; $cfg['environmentExclude'] = @('plugins'); Save-SwConfig $cfg
+Check 'config: environmentExclude opts an item out' (@(Sync-SwPlugins -From $alice -To @($bob)).Count -eq 0)
+$cfg = Get-SwConfig; $cfg['environmentExclude'] = @(); $cfg['syncEnvironment'] = $false; Save-SwConfig $cfg
+Check 'config: syncEnvironment=false disables Sync-SwAll environment part' (@(Sync-SwAll -From $alice -To @($bob) -DryRun -Policy $pol | Where-Object Action -like 'plugin-*').Count -eq 0)
+$cfg = Get-SwConfig; $cfg['syncEnvironment'] = $true; Save-SwConfig $cfg
+
 # ---------- CLI ----------------------------------------------------------------------------------
 $o = & $pwsh -NoProfile -File (Join-Path $repo 'share-work.ps1') status 2>&1 | Out-String
 Check 'cli: status runs' ($LASTEXITCODE -eq 0 -and $o -match 'alice' -and $o -match 'bob')
