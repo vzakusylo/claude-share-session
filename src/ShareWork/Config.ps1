@@ -40,6 +40,7 @@ function Get-SwConfig {
     if (-not $c.ContainsKey('importArchived')) { $c['importArchived'] = $false }
     if (-not $c.ContainsKey('syncEnvironment')) { $c['syncEnvironment'] = $true }
     if (-not $c.ContainsKey('environmentExclude')) { $c['environmentExclude'] = @() }
+    if (-not $c.ContainsKey('debugLog')) { $c['debugLog'] = $false }
     $c
 }
 
@@ -56,6 +57,16 @@ function Write-SwLog([string]$Message) {
         if ((Get-Item $p).Length -gt 1MB) {
             $keep = Get-Content $p -Tail 2000; Set-Content $p $keep -Encoding utf8
         }
+    } catch { }
+}
+
+function Write-SwDebug([string]$Message) {
+    <# Detailed trace in debug.log, only while accounts.json "debugLog" is true (share-work log on|off|clear). #>
+    try {
+        if (-not (Get-SwConfig)['debugLog']) { return }
+        $who = if ($env:CLAUDE_CODE_ACCOUNT_UUID) { $env:CLAUDE_CODE_ACCOUNT_UUID.Substring(0, 8) } else { 'terminal' }
+        Add-Content -Path (Join-Path (Get-SwHome) 'debug.log') -Encoding utf8 `
+            -Value ('{0:yyyy-MM-dd HH:mm:ss.fff} [{1} {2}] {3}' -f (Get-Date), $PID, $who, $Message)
     } catch { }
 }
 

@@ -198,6 +198,7 @@ $h = Join-Path $repo 'hooks'
 $out = 'not json{' | & $pwsh -NoProfile -File (Join-Path $h 'session-start.ps1'); $code = $LASTEXITCODE
 Check 'hook session-start: bad input -> exit 0, no output' ($code -eq 0 -and -not $out)
 $env:CLAUDE_CODE_ACCOUNT_UUID = $B
+$env:SHAREWORK_NO_PUSH = '1'   # no background switch sync while the fixture is still used below
 Update-SwStatus -Me ([pscustomobject]@{ Uuid = $A; Name = 'alice'; Dir = (Join-Path $sessions $A) }) -CliSessionId 'cli-s1' -Cwd $repoDir
 $out = (@{ cwd = $repoDir; hook_event_name = 'SessionStart' } | ConvertTo-Json) | & $pwsh -NoProfile -File (Join-Path $h 'session-start.ps1')
 $parsed = $null; try { $parsed = $out | ConvertFrom-Json } catch { }
@@ -311,6 +312,49 @@ $polA = [pscustomobject]@{ Enabled = $true; ActiveUuid = $A; AllowDeletesFrom = 
 New-Index $A $OA 'act1' | Out-Null; New-Index $B $OB 'act1' | Out-Null; New-Tomb $B $OB 'act1' $nowMs
 $rows = @(Sync-SwTombstones -From $bob -To @($alice3) -Policy $polA)
 Check 'all accounts: account open in the app is never cleaned while open' ((Test-Path (Join-Path $sessions "$A/$OA/local_act1.json")) -and $rows.Count -eq 0)
+
+# ---------- account switch: merge every account, deletions from ANY account win, debug log ----------
+$cfg = Get-SwConfig; $cfg['debugLog'] = $true; Save-SwConfig $cfg
+$bob3 = $three | Where-Object Uuid -eq $B; $c3 = $three | Where-Object Uuid -eq $C2
+New-Index $A $OA 'sw1' | Out-Null; New-Index $B $OB 'sw2' | Out-Null; New-Index $C2 $OC2 'sw3' | Out-Null      # one chat per account
+foreach ($acct in @(@($A, $OA), @($B, $OB), @($C2, $OC2))) { New-Index $acct[0] $acct[1] 'gone' | Out-Null }
+Remove-Item (Join-Path $sessions "$C2/$OC2/local_gone.json"); New-Tomb $C2 $OC2 'gone' $nowMs           # deleted in carol only
+$polB = [pscustomobject]@{ Enabled = $true; ActiveUuid = $B; AllowDeletesFrom = $B; Note = $null }       # bob is open in the app
+$rows = @(Sync-SwEverything -Accounts $three -Policy $polB -Reason 'test-switch')
+$has = { param($u, $o, $id) Test-Path (Join-Path $sessions "$u/$o/local_$id.json") }
+Check 'switch: every chat from every account reaches every account' (@(foreach ($id in 'sw1', 'sw2', 'sw3') { foreach ($p in @(@($A, $OA), @($B, $OB), @($C2, $OC2))) { & $has $p[0] $p[1] $id } }) -notcontains $false)
+Check 'switch: chat deleted in a non-active account is deleted in the other non-open account' (-not (& $has $A $OA 'gone'))
+Check 'switch: account open in the app keeps it until it is no longer open' (& $has $B $OB 'gone')
+$polA2 = [pscustomobject]@{ Enabled = $true; ActiveUuid = $A; AllowDeletesFrom = $A; Note = $null }       # user switches to alice
+$rows = @(Sync-SwEverything -Accounts $three -Policy $polA2 -Reason 'test-switch')
+Check 'switch: after switching away, the previously open account is cleaned too' (-not (& $has $B $OB 'gone') -and -not @(Get-ChildItem $sessions -Recurse -Filter 'local_gone.json').Count)
+Check 'switch: second run is idempotent' (@(Sync-SwEverything -Accounts $three -Policy $polA2 | Where-Object Action -ne 'plugin-missing').Count -eq 0)
+$dbg = Get-Content (Join-Path $env:SHAREWORK_HOME 'debug.log') -Raw
+Check 'debug log: start, each change and summary written' ($dbg -match 'test-switch: start, 3 account' -and $dbg -match 'session-removed' -and $dbg -match 'test-switch: done, \d+ change')
+
+$me3 = [pscustomobject]@{ Uuid = $A; Name = 'alice' }
+Remove-Item (Join-Path $env:SHAREWORK_HOME 'last-account.json') -ErrorAction SilentlyContinue
+Check 'switch detect: first run reports a switch with no previous account' ((Test-SwAccountSwitch -Me $me3) -eq '')
+Check 'switch detect: same account again -> no switch' ($null -eq (Test-SwAccountSwitch -Me $me3))
+Check 'switch detect: other account -> returns the previous account' ((Test-SwAccountSwitch -Me ([pscustomobject]@{ Uuid = $B; Name = 'bob' })) -eq $A)
+Check 'switch detect: logged in sync.log' ((Get-Content (Join-Path $env:SHAREWORK_HOME 'sync.log') -Raw) -match 'account switch alice -> bob')
+
+# CLI: share-work switch (what the hook starts in the background) and log on/debug/clear
+New-Index $C2 $OC2 'cli1' | Out-Null
+$sw = Join-Path $repo 'share-work.ps1'
+$env:SHAREWORK_SESSIONS_ROOT = $sessions; $env:CLAUDE_CODE_ACCOUNT_UUID = $A
+& $pwsh -NoProfile -File $sw switch | Out-Null
+Check 'cli switch: merges chats into the non-open accounts' (& $has $B $OB 'cli1')
+Check 'cli log debug: shows the trace' ((& $pwsh -NoProfile -File $sw log debug) -join "`n" -match 'switch to alice')
+$out = & $pwsh -NoProfile -File $sw log clear
+Check 'cli log clear: deletes debug.log and turns it off' (-not (Test-Path (Join-Path $env:SHAREWORK_HOME 'debug.log')) -and -not (Get-SwConfig)['debugLog'])
+Write-SwDebug 'should not be written'
+Check 'debug log: nothing written while off' (-not (Test-Path (Join-Path $env:SHAREWORK_HOME 'debug.log')))
+& $pwsh -NoProfile -File $sw log on | Out-Null
+Check 'cli log on: turns it on' ((Get-SwConfig)['debugLog'] -eq $true)
+& $pwsh -NoProfile -File $sw log clear | Out-Null
+Remove-Item env:CLAUDE_CODE_ACCOUNT_UUID -ErrorAction SilentlyContinue
+
 Remove-Item (Join-Path $sessions $C2) -Recurse -Force
 
 # presets

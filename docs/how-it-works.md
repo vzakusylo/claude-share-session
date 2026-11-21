@@ -77,6 +77,15 @@ Cowork `local-agent-mode-sessions`, credentials.
 | `SessionStart` | `hooks/session-start.ps1` | registers the account, prints `hookSpecificOutput.additionalContext` with the briefing |
 | `Stop`, `SessionEnd` | `hooks/turn-end.ps1` | starts `share-work.ps1 after-turn` detached (hidden window on Windows, `nohup` on macOS) and exits |
 
+**Account switch.** `SessionStart` records the account in `last-account.json`. On the first session of a
+different account it starts `share-work.ps1 switch` in the background: a full merge where every account is a
+source once (`Sync-SwEverything`), so every chat reaches every account and a chat deleted in any account is
+removed everywhere. The account open in the app is never written; it is cleaned on the next switch away.
+`share-work sync` runs the same merge by hand.
+
+**Debug log.** `share-work log on` writes a detailed trace (each switch, every change with action, accounts and
+title, a summary) to `debug.log`; `log debug` shows it, `log clear` deletes it and turns it off.
+
 `after-turn` waits 6 s (the app writes the final index just after the turn), updates `status/<me>.json`,
 then runs the sessions + tasks sync under a named mutex. Hooks are registered in exec form
 (`command: pwsh`, `args: [...]`), so no bash is needed. Every hook catches all errors and exits 0.

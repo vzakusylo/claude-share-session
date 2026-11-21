@@ -14,7 +14,7 @@
   pwsh -File share-work.ps1 resume            # print `claude --resume` commands for this folder's recent sessions (all accounts)
 #>
 param(
-    [Parameter(Position = 0)] [ValidateSet('status', 'push', 'sync', 'brief', 'handoff', 'name', 'resume', 'log', 'after-turn')] [string] $Command = 'status',
+    [Parameter(Position = 0)] [ValidateSet('status', 'push', 'sync', 'brief', 'handoff', 'name', 'resume', 'log', 'after-turn', 'switch')] [string] $Command = 'status',
     [Parameter(Position = 1)] [string] $Arg1,
     [Parameter(Position = 2)] [string] $Arg2,
     [switch] $DryRun,
@@ -88,9 +88,7 @@ switch ($Command) {
     }
     'sync' {
         $policy = Get-SwTaskWritePolicy
-        $rows = Invoke-SwWithLock {
-            foreach ($a in $all) { Sync-SwAll -From $a -To $all -DryRun:$DryRun -Policy $policy }
-        }
+        $rows = Invoke-SwWithLock { Sync-SwEverything -Accounts $all -DryRun:$DryRun -Policy $policy -Reason 'sync' }
         Show-Rows $rows
         if ($policy.Note) { $policy.Note }
         if ($rows -and -not $DryRun -and (Get-Process -Name 'claude' -ErrorAction SilentlyContinue | Where-Object MainWindowTitle)) {
@@ -135,9 +133,31 @@ switch ($Command) {
             if ($CliSessionId) { Update-SwStatus -Me $me -CliSessionId $CliSessionId -Cwd $(if ($PSBoundParameters.ContainsKey('Cwd')) { $Cwd } else { '' }) }
             if ($env:SHAREWORK_NO_PUSH -ne '1') {
                 $others = @($all | Where-Object Uuid -ne $me.Uuid)
-                Invoke-SwWithLock { Sync-SwAll -From $me -To $others } | Out-Null
+                $rows = @(Invoke-SwWithLock { Sync-SwAll -From $me -To $others })
+                foreach ($r in $rows) { Write-SwDebug ("after-turn:   {0,-16} {1} -> {2}  '{3}'" -f $r.Action, $r.From, $r.To, $r.Title) }
+                Write-SwDebug ("after-turn: {0} -> others, {1} change(s)" -f $me.Name, $rows.Count)
             }
         } catch { Write-SwLog "after-turn error: $($_.Exception.Message)" }
     }
-    'log' { Get-Content (Join-Path (Get-SwHome) 'sync.log') -Tail 40 -ErrorAction SilentlyContinue }
+    'switch' {
+        # started in the background by hooks/session-start.ps1 on the first session after an account switch
+        try {
+            $rows = @(Invoke-SwWithLock { Sync-SwEverything -Accounts $all -Policy (Get-SwTaskWritePolicy) -Reason "switch to $($me.Name)" })
+            Write-SwLog ("switch sync for {0}: {1} change(s)" -f $me.Name, $rows.Count)
+        } catch { Write-SwLog "switch error: $($_.Exception.Message)"; Write-SwDebug "switch error: $($_.Exception.Message)" }
+    }
+    'log' {
+        $h = Get-SwHome; $dbg = Join-Path $h 'debug.log'
+        switch ($Arg1) {
+            'on' { $cfg = Get-SwConfig; $cfg['debugLog'] = $true; Save-SwConfig $cfg; "Debug log on: $dbg" }
+            'off' { $cfg = Get-SwConfig; $cfg['debugLog'] = $false; Save-SwConfig $cfg; 'Debug log off (existing log kept; `log clear` removes it).' }
+            'clear' {
+                $cfg = Get-SwConfig; $cfg['debugLog'] = $false; Save-SwConfig $cfg
+                Remove-Item $dbg -Force -ErrorAction SilentlyContinue
+                'Debug log removed and turned off.'
+            }
+            'debug' { if (Test-Path $dbg) { Get-Content $dbg -Tail 80 } else { 'No debug log (turn it on with `log on`).' } }
+            default { Get-Content (Join-Path $h 'sync.log') -Tail 40 -ErrorAction SilentlyContinue }
+        }
+    }
 }

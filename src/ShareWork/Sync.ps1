@@ -34,6 +34,54 @@ function Sync-SwAll {
     $rows
 }
 
+function Sync-SwEverything {
+    <#
+      Full merge between ALL accounts: every account is a source once, so every chat reaches every account and a
+      deletion made in ANY account removes the chat everywhere (the account open in the app is cleaned later).
+      Used when the user switches accounts and by `share-work sync`.
+    #>
+    param([object[]] $Accounts = @(Get-SwAccounts), [switch] $DryRun, $Policy = (Get-SwTaskWritePolicy), [string] $Reason = 'sync')
+    Write-SwDebug ("{0}: start, {1} account(s): {2}; open in app: {3}; dryRun={4}" -f $Reason, @($Accounts).Count,
+        (($Accounts | ForEach-Object Name) -join ', '), $(if ($Policy.ActiveUuid) { ($Accounts | Where-Object Uuid -eq $Policy.ActiveUuid).Name } else { '-' }), [bool]$DryRun)
+    $rows = @(foreach ($src in $Accounts) { Sync-SwAll -From $src -To $Accounts -DryRun:$DryRun -Policy $Policy })
+    foreach ($r in $rows) { Write-SwDebug ("{0}:   {1,-16} {2} -> {3}  '{4}'  {5}" -f $Reason, $r.Action, $r.From, $r.To, $r.Title, $r.Cwd) }
+    Write-SwDebug ("{0}: done, {1} change(s){2}" -f $Reason, $rows.Count, $(if ($rows) { ': ' + (($rows | Group-Object Action | ForEach-Object { "$($_.Count) $($_.Name)" }) -join ', ') } else { '' }))
+    $rows
+}
+
+function Test-SwAccountSwitch {
+    <#
+      Records the account that started a session; returns the previous account's uuid when it differs
+      (a switch), '' on the very first run, $null when nothing changed.
+    #>
+    param([Parameter(Mandatory)] $Me)
+    $p = Join-Path (Get-SwHome) 'last-account.json'
+    $prev = Read-SwJsonFile $p
+    $prevUuid = if ($prev) { [string]$prev['uuid'] } else { $null }
+    if ($prevUuid -eq $Me.Uuid) { return $null }
+    Write-SwFileAtomic $p (@{ uuid = $Me.Uuid; name = $Me.Name; at = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json)
+    $prevName = if ($prev) { $prev['name'] } else { '(none)' }
+    Write-SwLog ("account switch {0} -> {1}" -f $prevName, $Me.Name)
+    Write-SwDebug ("switch detected: {0} -> {1}" -f $prevName, $Me.Name)
+    if ($prevUuid) { $prevUuid } else { '' }
+}
+
+function Start-SwDetached([string[]] $ShareWorkArgs) {
+    <# Run share-work.ps1 with these arguments in the background (hidden window / nohup) and return at once. #>
+    $script = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../share-work.ps1'))
+    $exe = (Get-Process -Id $PID).Path
+    if ($IsWindows) {
+        $a = @('-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', "`"$script`"") + $ShareWorkArgs
+        Start-Process -FilePath $exe -ArgumentList $a -WindowStyle Hidden | Out-Null
+    } else {
+        $q = { param($s) "'" + ($s -replace "'", "'\''") + "'" }
+        $cmd = "nohup $(& $q $exe) -NoLogo -NoProfile -NonInteractive -File $(& $q $script) " + (($ShareWorkArgs | ForEach-Object { & $q $_ }) -join ' ') + ' >/dev/null 2>&1 &'
+        $psi = [System.Diagnostics.ProcessStartInfo]::new('/bin/sh'); $psi.ArgumentList.Add('-c'); $psi.ArgumentList.Add($cmd)
+        $psi.UseShellExecute = $false
+        [System.Diagnostics.Process]::Start($psi) | Out-Null
+    }
+}
+
 function Invoke-SwWithLock([scriptblock]$Body, [int]$TimeoutMs = 20000) {
     $m = [System.Threading.Mutex]::new($false, $(if ($IsWindows) { 'Local\ClaudeShareWorkSync' } else { 'ClaudeShareWorkSync' }))
     $got = $false

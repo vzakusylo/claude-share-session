@@ -9,6 +9,11 @@ try {
     try { Register-SwCurrentAccount } catch { }
     $me = Get-SwCurrentAccount
     if (-not $me) { exit 0 }
+    # switching accounts is enough to sync: on the first session of a different account, merge all accounts
+    try {
+        $prev = Test-SwAccountSwitch -Me $me
+        if ($null -ne $prev -and $env:SHAREWORK_NO_PUSH -ne '1') { Start-SwDetached @('switch', '-DelaySeconds', '3') }
+    } catch { Write-SwLog "switch detection error: $($_.Exception.Message)" }
     $brief = Get-SwBriefing -Me $me -Cwd $cwd
     if ($brief) {
         @{ hookSpecificOutput = @{ hookEventName = 'SessionStart'; additionalContext = $brief } } |
