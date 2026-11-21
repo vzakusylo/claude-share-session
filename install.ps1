@@ -55,7 +55,7 @@ Write-SwFileAtomic $settingsPath ($settings | ConvertTo-Json -Depth 20)
 "settings.json updated ($(if ($Uninstall) {'hooks removed'} else {'SessionStart, Stop, SessionEnd hooks'}))"
 
 # --- skills --------------------------------------------------------------------------------
-foreach ($s in 'handoff', 'shared-work') {
+foreach ($s in 'handoff', 'shared-work', 'export-projects-to-folders') {
     $dst = Join-Path $claudeDir 'skills' $s
     if ($Uninstall) {
         if (Test-Path (Join-Path $dst '.sharework')) { Remove-Item $dst -Recurse -Force; "skill /$s removed" }

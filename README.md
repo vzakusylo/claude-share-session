@@ -70,6 +70,7 @@ After that it runs by itself: every turn ends with a background sync. Uninstall:
 | sync | just switch accounts in the app — the first session of the new account merges all accounts in the background; or run `share-work sync` (add `-DryRun` to preview) |
 | see how a sync went | `share-work log on`, switch accounts, then `share-work log debug`; `share-work log clear` when done |
 | know when to switch before you hit the limit | copy the app's **Usage** page and run `share-work usage paste` (or `usage set 23 75 -FiveHourReset "8:10 PM" -WeeklyReset "Tue 11:00 PM"`); `share-work usage` shows every account, a forecast and the best account to switch to. The app warns you after a turn when the limit is close |
+| copy claude.ai Chat projects (instructions, library, each chat's files and a handoff note) to local folders | `/export-projects-to-folders` (uses the browser; the folders are then shared by every account) |
 | check everything | `share-work status` |
 | name an account | `share-work name <uuid-prefix> alice` |
 
