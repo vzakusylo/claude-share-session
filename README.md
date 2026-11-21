@@ -84,6 +84,7 @@ Settings live in `~/.claude/shared-work/accounts.json`: `names`, `emails` (e-mai
 | Transcripts, `CLAUDE.md`, memory, skills, hooks | `~/.claude` | yes, already |
 | Sidebar list | `claude-code-sessions/<account>/<org>/local_*.json` | **no → mirrored** |
 | Scheduled-task list | `claude-code-sessions/<account>/<org>/scheduled-tasks.json` | **no → mirrored** |
+| Pinned sessions | `isStarred` in `local_*.json` | **yes → the last account used decides** |
 | Session deletions | claude-code-sessions/<account>/<org>/deleted_<id> | **no → mirrored** (session moved to backups) |
 | New-session presets | ccd-session-presets.json (yAccount.<account>) | **no → mirrored** |
 | Installed plugins | plugin-list/<account>/<org>/plugins.json | no, reported by status |
@@ -110,7 +111,7 @@ Full internals: [docs/how-it-works.md](docs/how-it-works.md).
 
 | Suite | Runs on | Checks |
 |---|---|---|
-| [`test-core.ps1`](tests/test-core.ps1) | synthetic data — CI on Windows, macOS, Linux | 91: accounts, mirroring rules, environment sync, project keys, status, handoff, briefing, hooks, installer, CLI |
+| [`test-core.ps1`](tests/test-core.ps1) | synthetic data — CI on Windows, macOS, Linux | 107: accounts, mirroring rules, pins, environment sync, project keys, status, handoff, briefing, hooks, installer, CLI |
 | [`test-scheduled.ps1`](tests/test-scheduled.ps1) | a copy of your real data | 16 scheduled-task scenarios |
 | [`compare-mirror.js`](tests/compare-mirror.js) | your real data, read-only | every mirror equals its original |
 

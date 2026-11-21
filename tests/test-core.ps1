@@ -90,6 +90,28 @@ $sp = Join-Path $sessions "$A/$OA/local_s1.json"; $j = Read-SwIndex $sp; $j['tit
 [IO.File]::WriteAllText($sp, ($j | ConvertTo-Json -Depth 10)); (Get-Item $sp).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-5)
 Check 'update: older source does not overwrite newer target' (@(Sync-SwSessions -From $alice -To @($bob)).Count -eq 0 -and (Read-SwIndex $copyPath)['title'] -ne 'stale')
 
+# pins (isStarred): the account syncing now (the last one used) decides, even if the other file is newer
+$pa = New-Index $A $OA 'p1' @{ isStarred = $true } ((Get-Date).AddHours(-3))
+$pb = New-Index $B $OB 'p1' @{ isStarred = $false; completedTurns = 9 } ((Get-Date).AddHours(-1))
+$pbTime = (Get-Item $pb).LastWriteTimeUtc
+$dry = @(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-p1' -DryRun)
+Check 'pin: dry run reports pin, writes nothing' ($dry.Count -eq 1 -and $dry[0].Action -eq 'pin' -and -not (Read-SwIndex $pb)['isStarred'])
+$rows = @(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-p1')
+$pj = Read-SwIndex $pb
+Check 'pin: pinned in last account -> pinned in other (newer) account' ($rows.Count -eq 1 -and $rows[0].Action -eq 'pin' -and $pj['isStarred'] -eq $true)
+Check 'pin: only isStarred changed, other fields kept' ($pj['completedTurns'] -eq 9 -and $pj['remoteMcpServersConfig'][0]['name'] -eq "connector-of-$B")
+Check 'pin: target mtime kept' ([Math]::Abs(((Get-Item $pb).LastWriteTimeUtc - $pbTime).TotalSeconds) -lt 1)
+Check 'pin: idempotent' (@(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-p1').Count -eq 0)
+# bob is now the last account and unpins: alice follows
+$j = Read-SwIndex $pb; $j['isStarred'] = $false; [IO.File]::WriteAllText($pb, ($j | ConvertTo-Json -Depth 10)); (Get-Item $pb).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-4)
+$rows = @(Sync-SwSessions -From $bob -To @($alice) -OnlyCliSessionId 'cli-p1')
+Check 'pin: unpin in last account -> unpinned in other account' ($rows.Count -eq 1 -and (Read-SwIndex $pa)['isStarred'] -eq $false)
+# source without isStarred never touches the target pin
+$j = Read-SwIndex $pa; $j.Remove('isStarred'); [IO.File]::WriteAllText($pa, ($j | ConvertTo-Json -Depth 10)); (Get-Item $pa).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-6)
+$j = Read-SwIndex $pb; $j['isStarred'] = $true; [IO.File]::WriteAllText($pb, ($j | ConvertTo-Json -Depth 10))
+Check 'pin: source without isStarred leaves target pin alone' (@(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-p1').Count -eq 0 -and (Read-SwIndex $pb)['isStarred'] -eq $true)
+Remove-Item $pa, $pb
+
 # importArchived + only-one-session filter
 $cfg = Get-SwConfig; $cfg.importArchived = $true; Save-SwConfig $cfg
 $rows = @(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-s2')

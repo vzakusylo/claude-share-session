@@ -26,6 +26,9 @@ sync.log
 
 * Key: file name `local_<id>.json`. Missing in the target → created (archived ones only with `importArchived`).
   Present in both → the newer file (`LastWriteTimeUtc`) wins, if the contents differ.
+* Pins (`isStarred`): the account that is syncing (the last one used) decides. If its pin state differs from a
+  target copy, only `isStarred` is patched in the target — even when the target file is newer — and the target's
+  timestamp is kept. A source file without `isStarred` never changes a target pin.
 * Account-bound fields are never copied: `remoteMcpServersConfig`, `enabledMcpTools`, `bridgeSessionIds`,
   `remoteControl*`, `steeredByRemoteClient`, `chromeTabGroupId`, `startedFromEnvironmentId`. A new copy gets
   `remoteMcpServersConfig: []`; an existing copy keeps its own values.

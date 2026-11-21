@@ -70,7 +70,27 @@ function Sync-SwSessions {
                 $targetPath = Join-Path $dst.PrimaryDir $sf.Name
                 $action = 'create'
             } else {
-                if ($sf.LastWriteTimeUtc -le $tf.LastWriteTimeUtc.AddSeconds(1)) { continue }
+                $tgt = $null
+                if ($sf.LastWriteTimeUtc -le $tf.LastWriteTimeUtc.AddSeconds(1)) {
+                    # pins: the account syncing now (the last one used) decides, even when the target file is newer
+                    if (-not $src.ContainsKey('isStarred')) { continue }
+                    $tgt = Read-SwIndex $tf.FullName
+                    if (-not $tgt -or [bool]$tgt['isStarred'] -eq [bool]$src['isStarred']) { continue }
+                    $tgt['isStarred'] = [bool]$src['isStarred']
+                    $row = [pscustomobject]@{
+                        Action = 'pin'; From = $From.Name; To = $dst.Name; Title = $src['title']
+                        Cwd = $src['cwd']; CliSessionId = $src['cliSessionId']; File = $tf.FullName
+                    }
+                    $result.Add($row)
+                    if ($DryRun) { continue }
+                    try {
+                        $keep = $tf.LastWriteTimeUtc
+                        Write-SwFileAtomic $tf.FullName ($tgt | ConvertTo-Json -Depth 50)
+                        (Get-Item -LiteralPath $tf.FullName).LastWriteTimeUtc = $keep
+                        Write-SwLog ("pin={0} {1}->{2} '{3}' {4}" -f [bool]$src['isStarred'], $From.Name, $dst.Name, $src['title'], $src['cliSessionId'])
+                    } catch { Write-SwLog ("ERROR pin {0}: {1}" -f $tf.FullName, $_.Exception.Message) }
+                    continue
+                }
                 $tgt = Read-SwIndex $tf.FullName
                 if (-not $tgt) { continue }
                 if ((Get-SwComparable $src) -eq (Get-SwComparable $tgt)) { continue }
