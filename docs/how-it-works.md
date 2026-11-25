@@ -29,6 +29,9 @@ sync.log
 * Pins (`isStarred`): the account that is syncing (the last one used) decides. If its pin state differs from a
   target copy, only `isStarred` is patched in the target — even when the target file is newer — and the target's
   timestamp is kept. A source file without `isStarred` never changes a target pin.
+* Remote Control (`remoteControlUserEnabled`): switched on for a session in any account → switched on in every
+  account's copy (also patched into a newer target copy, like pins). It is never switched off by a sync. The
+  connection itself (`bridgeSessionIds`, `remoteControlAutoEligible`) stays per account.
 * Account-bound fields are never copied: `remoteMcpServersConfig`, `enabledMcpTools`, `bridgeSessionIds`,
   `remoteControl*`, `steeredByRemoteClient`, `chromeTabGroupId`, `startedFromEnvironmentId`. A new copy gets
   `remoteMcpServersConfig: []`; an existing copy keeps its own values.

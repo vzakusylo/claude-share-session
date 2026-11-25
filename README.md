@@ -92,7 +92,8 @@ Settings live in `~/.claude/shared-work/accounts.json`: `names`, `emails` (e-mai
 | Session deletions | claude-code-sessions/<account>/<org>/deleted_<id> | **no → mirrored** (session moved to backups) |
 | New-session presets | ccd-session-presets.json (yAccount.<account>) | **no → mirrored** |
 | Installed plugins | plugin-list/<account>/<org>/plugins.json | no, reported by status |
-| Connectors, Remote Control | per account | no, kept per account |
+| Remote Control on/off per session | `remoteControlUserEnabled` in `local_*.json` | **yes → on in any account = on in all** |
+| Connectors, Remote Control connection | per account | no, kept per account |
 
 1. **After every turn**, a `Stop` hook starts a background step (the hook itself returns in under a second).
    It records this account's status and copies its sessions and scheduled tasks into the other accounts.

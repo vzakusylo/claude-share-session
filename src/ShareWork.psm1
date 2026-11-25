@@ -24,6 +24,10 @@ $script:AccountBoundKeys = @(
     'remoteMcpServersConfig', 'enabledMcpTools', 'bridgeSessionIds', 'remoteControlUserEnabled',
     'remoteControlAutoEligible', 'steeredByRemoteClient', 'chromeTabGroupId', 'startedFromEnvironmentId'
 )
+# Remote Control switched on by the user for a session: "on" in any account turns it on in every account
+# (never off). The connection itself (bridgeSessionIds, remoteControlAutoEligible) stays per account.
+$script:RemoteControlKey = 'remoteControlUserEnabled'
+
 # scheduledTaskId is NOT account-bound any more: scheduled tasks are mirrored too (Sync-SwScheduledTasks),
 # so a run's session keeps its link to the task in every account.
 

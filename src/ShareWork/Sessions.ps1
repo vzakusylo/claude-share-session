@@ -67,18 +67,25 @@ function Sync-SwSessions {
                 $out = [ordered]@{}
                 foreach ($k in $src.Keys) { if ($k -notin $script:AccountBoundKeys) { $out[$k] = $src[$k] } }
                 $out['remoteMcpServersConfig'] = @()
+                if ($src[$script:RemoteControlKey] -eq $true) { $out[$script:RemoteControlKey] = $true }
                 $targetPath = Join-Path $dst.PrimaryDir $sf.Name
                 $action = 'create'
             } else {
                 $tgt = $null
                 if ($sf.LastWriteTimeUtc -le $tf.LastWriteTimeUtc.AddSeconds(1)) {
-                    # pins: the account syncing now (the last one used) decides, even when the target file is newer
-                    if (-not $src.ContainsKey('isStarred')) { continue }
+                    # field patches that apply even when the target file is newer:
+                    #   pins: the account syncing now (the last one used) decides;
+                    #   Remote Control: switched on in any account -> on in every account.
+                    $wantPin = $src.ContainsKey('isStarred'); $wantRc = $src[$script:RemoteControlKey] -eq $true
+                    if (-not $wantPin -and -not $wantRc) { continue }
                     $tgt = Read-SwIndex $tf.FullName
-                    if (-not $tgt -or [bool]$tgt['isStarred'] -eq [bool]$src['isStarred']) { continue }
-                    $tgt['isStarred'] = [bool]$src['isStarred']
+                    if (-not $tgt) { continue }
+                    $acts = @()
+                    if ($wantPin -and [bool]$tgt['isStarred'] -ne [bool]$src['isStarred']) { $tgt['isStarred'] = [bool]$src['isStarred']; $acts += 'pin' }
+                    if ($wantRc -and $tgt[$script:RemoteControlKey] -ne $true) { $tgt[$script:RemoteControlKey] = $true; $acts += 'remote-control' }
+                    if (-not $acts) { continue }
                     $row = [pscustomobject]@{
-                        Action = 'pin'; From = $From.Name; To = $dst.Name; Title = $src['title']
+                        Action = ($acts -join '+'); From = $From.Name; To = $dst.Name; Title = $src['title']
                         Cwd = $src['cwd']; CliSessionId = $src['cliSessionId']; File = $tf.FullName
                     }
                     $result.Add($row)
@@ -87,16 +94,18 @@ function Sync-SwSessions {
                         $keep = $tf.LastWriteTimeUtc
                         Write-SwFileAtomic $tf.FullName ($tgt | ConvertTo-Json -Depth 50)
                         (Get-Item -LiteralPath $tf.FullName).LastWriteTimeUtc = $keep
-                        Write-SwLog ("pin={0} {1}->{2} '{3}' {4}" -f [bool]$src['isStarred'], $From.Name, $dst.Name, $src['title'], $src['cliSessionId'])
+                        Write-SwLog ("{0} pin={1} {2}->{3} '{4}' {5}" -f $row.Action, [bool]$tgt['isStarred'], $From.Name, $dst.Name, $src['title'], $src['cliSessionId'])
                     } catch { Write-SwLog ("ERROR pin {0}: {1}" -f $tf.FullName, $_.Exception.Message) }
                     continue
                 }
                 $tgt = Read-SwIndex $tf.FullName
                 if (-not $tgt) { continue }
-                if ((Get-SwComparable $src) -eq (Get-SwComparable $tgt)) { continue }
+                $needRc = $src[$script:RemoteControlKey] -eq $true -and $tgt[$script:RemoteControlKey] -ne $true
+                if (-not $needRc -and (Get-SwComparable $src) -eq (Get-SwComparable $tgt)) { continue }
                 $out = [ordered]@{}
                 foreach ($k in $src.Keys) { if ($k -notin $script:AccountBoundKeys) { $out[$k] = $src[$k] } }
                 foreach ($k in $script:AccountBoundKeys) { if ($tgt.ContainsKey($k)) { $out[$k] = $tgt[$k] } }
+                if ($src[$script:RemoteControlKey] -eq $true) { $out[$script:RemoteControlKey] = $true }
                 $targetPath = $tf.FullName
                 $action = 'update'
             }

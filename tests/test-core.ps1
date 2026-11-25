@@ -112,6 +112,25 @@ $j = Read-SwIndex $pb; $j['isStarred'] = $true; [IO.File]::WriteAllText($pb, ($j
 Check 'pin: source without isStarred leaves target pin alone' (@(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-p1').Count -eq 0 -and (Read-SwIndex $pb)['isStarred'] -eq $true)
 Remove-Item $pa, $pb
 
+# Remote Control: on in any account -> on in every account; never switched off; connection fields stay per account
+$ra = New-Index $A $OA 'rc1' @{ remoteControlUserEnabled = $true; remoteControlAutoEligible = $true } ((Get-Date).AddHours(-3))
+$rows = @(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-rc1')
+$rb = Join-Path $sessions "$B/$OB/local_rc1.json"; $rj = Read-SwIndex $rb
+Check 'remote control: new copy keeps it switched on' ($rows[0].Action -eq 'create' -and $rj['remoteControlUserEnabled'] -eq $true)
+Check 'remote control: connection fields not copied' (-not $rj.ContainsKey('remoteControlAutoEligible') -and -not $rj.ContainsKey('bridgeSessionIds'))
+$j = Read-SwIndex $rb; $j['remoteControlUserEnabled'] = $false; $j['completedTurns'] = 3
+[IO.File]::WriteAllText($rb, ($j | ConvertTo-Json -Depth 10)); (Get-Item $rb).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-1)
+$rows = @(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-rc1')
+Check 'remote control: turned on in a newer target copy (only that field)' ($rows.Count -eq 1 -and $rows[0].Action -match 'remote-control' -and (Read-SwIndex $rb)['remoteControlUserEnabled'] -eq $true -and (Read-SwIndex $rb)['completedTurns'] -eq 3)
+$j = Read-SwIndex $ra; $j['remoteControlUserEnabled'] = $false; [IO.File]::WriteAllText($ra, ($j | ConvertTo-Json -Depth 10)); (Get-Item $ra).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(-4)
+$rows = @(Sync-SwSessions -From $bob -To @($alice) -OnlyCliSessionId 'cli-rc1')
+Check 'remote control: set in the other account flows back' ((Read-SwIndex $ra)['remoteControlUserEnabled'] -eq $true)
+Check 'remote control: idempotent' (@(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-rc1').Count -eq 0 -and @(Sync-SwSessions -From $bob -To @($alice) -OnlyCliSessionId 'cli-rc1').Count -eq 0)
+$j = Read-SwIndex $rb; $j['remoteControlUserEnabled'] = $false; [IO.File]::WriteAllText($rb, ($j | ConvertTo-Json -Depth 10)); (Get-Item $rb).LastWriteTimeUtc = (Get-Date).ToUniversalTime()
+$rows = @(Sync-SwSessions -From $bob -To @($alice) -OnlyCliSessionId 'cli-rc1')
+Check 'remote control: "off" never switches another account off' ((Read-SwIndex $ra)['remoteControlUserEnabled'] -eq $true)
+Remove-Item $ra, $rb
+
 # importArchived + only-one-session filter
 $cfg = Get-SwConfig; $cfg.importArchived = $true; Save-SwConfig $cfg
 $rows = @(Sync-SwSessions -From $alice -To @($bob) -OnlyCliSessionId 'cli-s2')
